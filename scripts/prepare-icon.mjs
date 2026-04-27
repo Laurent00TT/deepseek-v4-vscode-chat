@@ -28,6 +28,10 @@ if (!existsSync(source)) {
 const meta = await sharp(source).metadata();
 console.log(`Source: ${meta.width}×${meta.height} (${meta.format}, ${(statSync(source).size / 1024).toFixed(1)} KB)`);
 
+// The source artwork is now full-bleed (blue extends to every edge), so we
+// just resize it down to the two marketplace target sizes. No trim, no inset
+// — those would corrupt a full-bleed image because trim() samples the
+// top-left pixel as the "background" to cut.
 await sharp(source)
 	.resize(128, 128, { fit: "cover", position: "center" })
 	.png({ compressionLevel: 9 })
