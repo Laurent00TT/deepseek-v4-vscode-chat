@@ -1,0 +1,23 @@
+# Build output
+out/
+dist/
+
+# Dependencies
+node_modules/
+
+# Test artifacts
+.vscode-test/
+
+# Packaged extension
+*.vsix
+
+# Editor / OS
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+# Temp files
+*.tmp
+.cache/

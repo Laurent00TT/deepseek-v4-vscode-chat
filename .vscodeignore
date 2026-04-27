@@ -1,0 +1,35 @@
+# Source — only ship compiled output
+src/**
+test/**
+scripts/**
+**/*.ts
+!out/**/*.d.ts
+
+# Asset cleanup — only ship the runtime 128×128 PNG
+assets/icon-source.*
+assets/icon@2x.*
+assets/*.svg
+
+# Dev configs
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
+tsconfig.json
+eslint.config.mjs
+.prettierignore
+.prettierrc
+
+# Repo metadata
+.github/**
+.gitignore
+docs/**
+
+# Build artifacts kept out of the package
+**/*.map
+*.vsix
+
+# Markdown — keep only the user-facing ones
+*.md
+!README.md
+!LICENSE
+!CHANGELOG.md

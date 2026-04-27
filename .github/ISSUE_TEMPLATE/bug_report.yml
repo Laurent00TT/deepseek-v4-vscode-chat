@@ -1,0 +1,89 @@
+name: 🐛 Bug Report
+description: Report a bug with the DeepSeek V4 Copilot Chat provider
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please run
+        `Show DeepSeek V4 Log` from the command palette and attach the
+        relevant log lines below — that's the single most useful thing
+        you can do to help us reproduce.
+
+  - type: input
+    id: ext-version
+    attributes:
+      label: Extension version
+      placeholder: e.g. 0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version
+      description: "Help → About"
+      placeholder: e.g. 1.117.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 / macOS 14 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model variant
+      options:
+        - DeepSeek V4 Pro (thinking)
+        - DeepSeek V4 Pro
+        - DeepSeek V4 Flash (thinking)
+        - DeepSeek V4 Flash
+        - Multiple / not relevant
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+      placeholder: "When I asked Copilot Chat to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps that reliably reproduce the issue.
+      placeholder: |
+        1. Select model "DeepSeek V4 Pro (thinking)"
+        2. Ask "..."
+        3. Observe error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Output from the **DeepSeek V4** OutputChannel (View → Output → "DeepSeek V4").
+        Redact your API key if it appears anywhere.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Privacy
+      options:
+        - label: I confirm I have removed my API key and any sensitive content from the report.
+          required: true

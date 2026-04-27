@@ -1,0 +1,97 @@
+{
+	"name": "deepseek-v4-vscode-chat",
+	"publisher": "Laurent00TT",
+	"displayName": "DeepSeek V4 for Copilot Chat",
+	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat. Solves the reasoning_content multi-turn 400 bug, with cost tracking and balance monitoring.",
+	"version": "0.2.0",
+	"icon": "assets/icon.png",
+	"author": {
+		"name": "Laurent00TT",
+		"url": "https://github.com/Laurent00TT"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Laurent00TT/deepseek-v4-vscode-chat"
+	},
+	"bugs": {
+		"url": "https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues"
+	},
+	"homepage": "https://github.com/Laurent00TT/deepseek-v4-vscode-chat#readme",
+	"engines": {
+		"vscode": "^1.106.0"
+	},
+	"categories": [
+		"AI",
+		"Chat"
+	],
+	"keywords": [
+		"deepseek",
+		"deepseek-v4",
+		"copilot",
+		"copilot-chat",
+		"thinking",
+		"reasoning",
+		"agent",
+		"llm",
+		"ai"
+	],
+	"galleryBanner": {
+		"color": "#0E2A4F",
+		"theme": "dark"
+	},
+	"license": "MIT",
+	"contributes": {
+		"languageModelChatProviders": [
+			{
+				"vendor": "deepseek-v4",
+				"displayName": "DeepSeek V4",
+				"managementCommand": "deepseekv4.manage"
+			}
+		],
+		"commands": [
+			{
+				"command": "deepseekv4.manage",
+				"title": "Manage DeepSeek V4 Provider"
+			},
+			{
+				"command": "deepseekv4.showLog",
+				"title": "Show DeepSeek V4 Log"
+			},
+			{
+				"command": "deepseekv4.refreshBalance",
+				"title": "Refresh DeepSeek V4 Balance"
+			},
+			{
+				"command": "deepseekv4.clearSession",
+				"title": "Clear DeepSeek V4 Session Counter"
+			},
+			{
+				"command": "deepseekv4.showCacheStats",
+				"title": "Show DeepSeek V4 Reasoning Cache Stats"
+			}
+		]
+	},
+	"main": "./out/extension.js",
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"lint": "eslint",
+		"format": "prettier --write .",
+		"watch": "tsc -watch -p ./",
+		"package": "vsce package",
+		"publish": "vsce publish",
+		"prepare-icon": "node scripts/prepare-icon.mjs"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.13.0",
+		"@stylistic/eslint-plugin": "^2.9.0",
+		"@types/node": "^22",
+		"@types/vscode": "^1.106.0",
+		"@vscode/vsce": "^3.2.0",
+		"eslint": "^9.13.0",
+		"prettier": "^3.1.0",
+		"sharp": "^0.34.5",
+		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.39.0"
+	}
+}

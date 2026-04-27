@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Question / Discussion
+    url: https://github.com/Laurent00TT/deepseek-v4-vscode-chat/discussions
+    about: For usage questions or open-ended discussion, please open a Discussion instead of an issue.
+  - name: 📖 DeepSeek API issues
+    url: https://api-docs.deepseek.com/
+    about: API errors that are not specific to this extension belong on the DeepSeek side.
