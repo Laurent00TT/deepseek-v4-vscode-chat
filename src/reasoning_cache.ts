@@ -216,10 +216,11 @@ export interface AssistantTurnFingerprintInput {
  *     Unicode NFKC-normalized). NFKC ensures that semantically identical
  *     characters with different Unicode representations (e.g. composed
  *     vs. decomposed forms like "é" vs "e\u0301") produce the same hash.
- *     This is a defense-in-depth measure: integration tests confirm that
- *     when `tools` are NOT advertised, no-tc turns do NOT need
- *     reasoning_content, so the text hash is only exercised when tools
- *     ARE present — where all assistant turns must carry it.
+ *     Defense in depth: integration tests show DS requires
+ *     reasoning_content on every prior assistant turn (text or tc) once
+ *     the conversation history contains any assistant.tool_calls turn.
+ *     With no tool_calls in history, the text hash is unused but harmless
+ *     — DS accepts redundant reasoning_content without complaint.
  *
  * Prefixes ("tc:" / "tx:") prevent collision between an empty no-text
  * turn and a tool-call turn that happened to hash to the same bytes.
