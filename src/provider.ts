@@ -791,36 +791,45 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 
 		const missingKeyTooltip = 'No API key configured. Run "Manage DeepSeek V4 Provider" from the Command Palette.';
 
-		return MODEL_VARIANTS.map((v) => ({
-			id: v.id,
-			name: v.displayName,
-			tooltip: hasKey ? v.tooltip : missingKeyTooltip,
-			// @non-public: `detail` is on the public typedef but Copilot Chat
-			// renders it directly under the model name in the picker.
-			detail: hasKey ? undefined : missingKeyTooltip,
-			family: "deepseek-v4",
-			version: "1.0.0",
-			maxInputTokens: v.maxInputTokens,
-			maxOutputTokens: v.maxOutputTokens,
-			capabilities: {
-				toolCalling: true,
-				imageInput: false,
-			},
-			// @non-public LanguageModelChatInformation fields used by Copilot
-			// Chat's model picker. Same shape used by Copilot's built-in
-			// OpenAI/Anthropic providers.
-			//   - `isUserSelectable`: controls picker visibility
-			//   - `statusIcon`: leading icon (we use `warning` when no key)
-			// FAILURE MODE: if Copilot Chat renames or removes these fields,
-			// the warning icon stops rendering — the picker still works
-			// because `id`, `name`, `family`, `version`, `maxInputTokens`,
-			// `maxOutputTokens`, `capabilities` are all public. We never
-			// REQUIRE these fields, only enhance the picker with them.
-			// Re-evaluate when `vscode.LanguageModelChatInformation` adds
-			// these to its public typedef.
-			isUserSelectable: true,
-			statusIcon: hasKey ? undefined : new vscode.ThemeIcon("warning"),
-		} as unknown as LanguageModelChatInformation));
+		return MODEL_VARIANTS.map((v) => {
+			// exposes a "Thinking Effort" dropdown in the model picker.
+			const configurationSchema: Record<string, unknown> | undefined = v.thinking
+				? {
+						properties: {
+							reasoningEffort: {
+								type: "string",
+								title: "Thinking Effort",
+								enum: ["high", "max"],
+								enumItemLabels: ["High", "Max"],
+								enumDescriptions: [
+									"High — default, faster responses",
+									"Max — strongest reasoning for complex agent tasks",
+								],
+								default: v.effort ?? "max",
+								group: "navigation",
+							},
+						},
+					}
+				: undefined;
+
+			return {
+				id: v.id,
+				name: v.displayName,
+				tooltip: hasKey ? v.tooltip : missingKeyTooltip,
+				detail: hasKey ? undefined : missingKeyTooltip,
+				family: "deepseek-v4",
+				version: "1.0.0",
+				maxInputTokens: v.maxInputTokens,
+				maxOutputTokens: v.maxOutputTokens,
+				capabilities: {
+					toolCalling: true,
+					imageInput: false,
+				},
+				configurationSchema,
+				isUserSelectable: true,
+				statusIcon: hasKey ? undefined : new vscode.ThemeIcon("warning"),
+			} as unknown as LanguageModelChatInformation;
+		});
 	}
 
 	async provideLanguageModelChatInformation(
@@ -947,8 +956,19 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             };
 
 			if (variant.thinking) {
-				if (variant.effort) {
-					(requestBody as Record<string, unknown>).reasoning_effort = variant.effort;
+				// Resolve thinking effort
+				const modelCfg = (options as unknown as Record<string, unknown>).modelConfiguration as Record<string, unknown> | undefined;
+				const modelOpts = options.modelOptions as Record<string, unknown> | undefined;
+				const effort =
+					(typeof modelCfg?.reasoningEffort === "string"
+						? modelCfg.reasoningEffort
+						: typeof modelOpts?.reasoning_effort === "string"
+							? modelOpts.reasoning_effort
+							: typeof modelOpts?.reasoningEffort === "string"
+								? modelOpts.reasoningEffort
+								: variant.effort) as string | undefined;
+				if (effort) {
+					(requestBody as Record<string, unknown>).reasoning_effort = effort;
 				}
 				// Per DeepSeek docs: temperature/top_p/penalty params are ignored
 				// in thinking mode. We omit them to keep the request body honest.
