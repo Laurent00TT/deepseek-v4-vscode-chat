@@ -2,8 +2,8 @@
 	"name": "deepseek-v4-vscode-chat",
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
-	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat. Solves the reasoning_content multi-turn 400 bug, with cost tracking and balance monitoring.",
-	"version": "0.2.2",
+	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat.",
+	"version": "0.3.0",
 	"icon": "assets/icon.png",
 	"author": {
 		"name": "Laurent00TT",
@@ -68,6 +68,34 @@
 			{
 				"command": "deepseekv4.showCacheStats",
 				"title": "Show DeepSeek V4 Reasoning Cache Stats"
+			}
+		],
+		"walkthroughs": [
+			{
+				"id": "deepseekv4GettingStarted",
+				"title": "DeepSeek V4 for Copilot Chat",
+				"description": "Set up your API key and start using DeepSeek V4 in Copilot Chat.",
+				"steps": [
+					{
+						"id": "setApiKey",
+						"title": "Set your DeepSeek API key",
+						"description": "[Get an API key](https://platform.deepseek.com/api_keys) from platform.deepseek.com.\n[Manage DeepSeek V4 Provider](command:deepseekv4.manage)",
+						"media": {
+							"markdown": "resources/walkthrough/set-api-key.md"
+						},
+						"completionEvents": [
+							"onCommand:deepseekv4.manage"
+						]
+					},
+					{
+						"id": "pickModel",
+						"title": "Pick a DeepSeek V4 model",
+						"description": "Open Copilot Chat and select a DeepSeek V4 variant from the model picker. If they're hidden, manage them via the language-model picker.\n[Open Language Models](command:workbench.action.chat.manage)",
+						"media": {
+							"markdown": "resources/walkthrough/pick-model.md"
+						}
+					}
+				]
 			}
 		]
 	},

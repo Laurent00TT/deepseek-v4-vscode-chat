@@ -9,6 +9,10 @@ const REFRESH_BALANCE_COMMAND = "deepseekv4.refreshBalance";
 const CLEAR_SESSION_COMMAND = "deepseekv4.clearSession";
 const SHOW_CACHE_STATS_COMMAND = "deepseekv4.showCacheStats";
 const VENDOR = "deepseek-v4";
+const WELCOME_SHOWN_KEY = "deepseekv4.welcomeShown";
+// publisher.name#walkthroughId — must match package.json's `publisher` and
+// the `id` under `contributes.walkthroughs`.
+const WALKTHROUGH_ID = "Laurent00TT.deepseek-v4-vscode-chat#deepseekv4GettingStarted";
 
 const VALIDATE_URL = "https://api.deepseek.com/v1/models";
 
@@ -153,6 +157,38 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 		}),
 	);
+
+	// First-run UX: open the walkthrough if the user hasn't seen it AND
+	// hasn't already configured a key. Fire-and-forget so activation isn't
+	// blocked on the welcome flow; failures (e.g. unknown walkthrough id
+	// during dev) just log and don't break the extension.
+	void showWelcomeIfNeeded(context, outputChannel);
+}
+
+async function showWelcomeIfNeeded(
+	context: vscode.ExtensionContext,
+	output: vscode.OutputChannel,
+): Promise<void> {
+	try {
+		if (context.globalState.get<boolean>(WELCOME_SHOWN_KEY)) {
+			return;
+		}
+		const existingKey = await context.secrets.get(SECRET_KEY);
+		if (existingKey) {
+			// Returning user with a configured key — don't shove a walkthrough
+			// at them, just remember we don't need to show it again.
+			await context.globalState.update(WELCOME_SHOWN_KEY, true);
+			return;
+		}
+		await vscode.commands.executeCommand(
+			"workbench.action.openWalkthrough",
+			WALKTHROUGH_ID,
+			false,
+		);
+		await context.globalState.update(WELCOME_SHOWN_KEY, true);
+	} catch (e) {
+		output.appendLine(`[welcome] failed to open walkthrough: ${e instanceof Error ? e.message : String(e)}`);
+	}
 }
 
 export function deactivate() {}

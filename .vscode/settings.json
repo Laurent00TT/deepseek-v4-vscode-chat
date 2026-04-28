@@ -5,5 +5,9 @@
     "git.branchProtection": [
         "main"
     ],
-    "files.trimTrailingWhitespace": true
+    "files.trimTrailingWhitespace": true,
+    "cSpell.words": [
+        "deepseek",
+        "multimodal"
+    ]
 }

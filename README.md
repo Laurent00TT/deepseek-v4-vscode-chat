@@ -13,8 +13,29 @@ Native DeepSeek V4 (Pro / Flash) provider for VS Code Copilot Chat — with full
 - Status bar with live account balance and session spend (auto-detects CNY / USD)
 - Background balance refresh after each chat (debounced, silent)
 - Persistent reasoning cache (survives VS Code restarts)
-- Actionable error notifications for 401 / 402 / 422 / 429
+- Actionable error notifications for 400 (reasoning) / 401 / 402 / 422 / 429, plus mid-stream `insufficient_system_resource` truncation handling
 - Retry on transient failures (5xx, 429, network jitter)
+- Adaptive token estimator (EMA-calibrated chars/token from real `usage` data)
+- First-run walkthrough and a "key required" warning state in the picker so the model entries are always discoverable
+
+## Text-only, by design
+
+DeepSeek V4 is in preview and only accepts text input. A common workaround
+in other extensions is a "vision proxy": when you drop an image into chat,
+it gets forwarded to a different multimodal model (GPT-4o, Claude, etc.)
+and the resulting description is fed to DeepSeek as if it had seen the
+picture.
+
+We deliberately do not do this. The proxy introduces a silent fidelity
+gap — DeepSeek answers based on another model's description of the image,
+not the image itself. Any hallucination, omission, or bias in the
+intermediate description leaks straight into DeepSeek's reply, and the UI
+gives the user no signal that the model never actually saw what they
+attached.
+
+When DeepSeek itself ships native multimodal support, we will enable it
+through this provider. Until then, image attachments are intentionally
+unsupported here.
 
 ## What this plugin uniquely solves
 

@@ -33,3 +33,4 @@ docs/**
 !README.md
 !LICENSE
 !CHANGELOG.md
+!resources/walkthrough/*.md

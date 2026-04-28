@@ -12,6 +12,7 @@ VS Code LM API
     │  invokes the registered LanguageModelChatProvider
     ▼
 DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, options, progress, token)
+    │  → creates a fresh StreamContext (per-call state, see below)
     │
     ├─ convertMessages(messages)         ← VS Code parts → OpenAI message[]
     ├─ attachReasoningToHistory(out)     ← inject cached reasoning_content into prior assistant turns
@@ -19,13 +20,54 @@ DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, op
     │
     ├─ POST /v1/chat/completions  (stream + thinking + tools)
     │
-    └─ processStreamingResponse
+    └─ processStreamingResponse(ctx, …)
          │  parse SSE chunks
-         ├─ delta.reasoning_content      → accumulate to _currentTurnReasoning, emit ThinkingPart if available
+         ├─ delta.reasoning_content      → ctx.reasoning += chunk, emit ThinkingPart if available
          ├─ delta.content                → emit LanguageModelTextPart
-         ├─ delta.tool_calls             → buffer, emit LanguageModelToolCallPart once JSON args are valid
-         └─ finish_reason / [DONE]       → flush + persist reasoning to the cache
+         ├─ delta.tool_calls             → ctx.toolCallBuffers, emit LanguageModelToolCallPart once JSON args are valid
+         └─ finish_reason / [DONE]       → see "Finish reasons" below for the dispatch table
 ```
+
+## Per-call state: StreamContext
+
+Every invocation of `provideLanguageModelChatResponse` constructs a fresh
+`StreamContext` carrying:
+
+- `toolCallBuffers` — map keyed by `tool_calls.index`, accumulating partial
+  function name + JSON arguments deltas
+- `completedToolCallIndices` — set of indices already emitted, used to
+  ignore late deltas after a complete tool call has flushed
+- `reasoning` — accumulated `reasoning_content` for this turn, fingerprinted
+  and persisted at finish time
+- `emittedText` / `emittedToolCalls` — what we sent to the host this turn,
+  used to compute the cache fingerprint
+- `hasShownThinkingHint` — once-per-turn flag for the `💭 Thinking...`
+  text fallback when the proposed `LanguageModelThinkingPart` API isn't
+  available
+
+Earlier versions of this code carried these as instance fields on the
+provider, which assumed VS Code calls `provideLanguageModelChatResponse`
+strictly serially. With multi-window / multi-chat-panel scenarios that
+assumption is fragile; encapsulating in `StreamContext` lets concurrent
+turns coexist without trampling each other's tool-call buffers.
+
+## Finish reasons
+
+DeepSeek can return five `finish_reason` values, including special ones
+inside an HTTP-200 response:
+
+| Reason | Meaning | What we do |
+|---|---|---|
+| `stop` / `tool_calls` | Clean completion | Flush tool-call buffers, **throw** on partial JSON args (something is genuinely wrong) |
+| `length` | Hit `max_tokens` | Log only; flush best-effort, don't throw |
+| `content_filter` | DS safety filter | Log only; flush best-effort, don't throw |
+| `insufficient_system_resource` | Backend mid-stream truncation (DS-specific) | Log, surface an `ErrorMessage` with a "Show Log" button, flush best-effort, don't throw |
+
+The non-clean cases never throw because partial tool-call JSON is *expected*
+on truncation; throwing would discard the reasoning_content already streamed
+to the UI. The user's chat input box will still let them resend; we don't
+bind a "Retry" button to any chat-host command (no stable, panel-agnostic
+retry command exists in the public VS Code API).
 
 ## The core challenge: cross-turn reasoning_content round-trip
 
@@ -47,12 +89,19 @@ The reasoning_content in the thinking mode must be passed back to the API.
 
 #### Write side (when a streamed response completes)
 
-When SSE delivers `finish_reason` or `[DONE]`, the full `reasoning_content` of the current turn has already accumulated into `_currentTurnReasoning`. A `captureProgress` wrapper around the host `progress` callback also accumulates:
+When SSE delivers `finish_reason` or `[DONE]`, the full `reasoning_content`
+of the current turn has already accumulated into `ctx.reasoning` (see
+"Per-call state: StreamContext" above). A `captureProgress` wrapper around
+the host `progress` callback also accumulates:
 
-- `_currentTurnEmittedText`: every text part we emitted to the UI this turn (used as the fallback fingerprint when no tool calls)
-- `_currentTurnEmittedToolCalls`: every `{id, name}` we emitted (the primary fingerprint anchor when present)
+- `ctx.emittedText`: every text part we emitted to the UI this turn (used
+  as the fallback fingerprint when no tool calls)
+- `ctx.emittedToolCalls`: every `{id, name}` we emitted (the primary
+  fingerprint anchor when present)
 
-`persistReasoningForTurn()` then computes a fingerprint, writes the entry to the LRU `_reasoningCache`, and persists to `globalState` (debounced 200 ms).
+`persistReasoningForTurn(ctx)` then computes a fingerprint, writes the
+entry to the LRU `_reasoningCache`, and persists to `globalState`
+(debounced 200 ms).
 
 #### Read side (start of every new request)
 
@@ -167,13 +216,56 @@ A two-currency pricing table (USD + CNY) handles cost estimation; the active cur
 `fetchWithRetry` wraps every API call:
 
 - **Retryable**: 5xx, 429, network errors, timeouts
-- **Non-retryable**: 401, 402, 422 and other 4xx — surface them immediately with actionable notifications
+- **Non-retryable**: 401, 402, 422, 400, and other 4xx — surface them immediately with actionable notifications
 - Exponential backoff 1 s → 2 s, max 3 attempts
 - Per-attempt timeout of 5 minutes (max-effort thinking can legitimately take 2–3 minutes)
 
+`notifyApiError` then maps each non-retryable status to a specific user
+prompt:
+
+| Status | Action button(s) | Routes to |
+|---|---|---|
+| 401 | "Update API Key" | `deepseekv4.manage` |
+| 402 | "Open DeepSeek Billing" | `https://platform.deepseek.com/usage` |
+| 422 | "Reload Window" | `workbench.action.reloadWindow` |
+| 429 | (warning, no button — retry already happened) | — |
+| 400 (with "reasoning"/"thinking" in body) | "Start New Chat" / "Show Log" | `workbench.action.chat.newChat` / `deepseekv4.showLog` |
+
+The 400+reasoning path exists because a stale or partial reasoning cache
+can produce DeepSeek's `The reasoning_content in the thinking mode must be
+passed back to the API` error, and "start a new chat" is the simplest
+recovery: a fresh chat session means no prior assistant turns to round-trip
+reasoning for.
+
 ## Status bar
 
-The status bar uses `vscode.MarkdownString` with embedded `command:` links — clicks fire the `refresh`, `showLog`, and `clearSession` commands. VS Code does not let a tooltip refresh while it is being shown, so after a manual refresh we flash a 4-second status-bar message as immediate feedback.
+The status bar uses `vscode.MarkdownString` with embedded `command:` links —
+clicks fire the `refresh`, `showLog`, and `clearSession` commands.
+
+### The hover-refresh limitation
+
+`StatusBarItem.tooltip` is declarative: assigning a new `MarkdownString`
+while the hover popup is already on screen does **not** re-render the
+visible popup. The user sees stale data until they mouse out and back in.
+
+We tried two work-arounds on the manual-refresh path:
+
+1. **Just swap the tooltip ref** — popup stays stale. (0.2.x behaviour.)
+2. **Dispose + recreate the StatusBarItem** — popup closes (good), but
+   VS Code 1.106+ does not auto-re-fire hover on the new item. The user
+   sees a flicker followed by the popup vanishing entirely. Strictly
+   worse than option 1.
+
+Settled approach (0.3.0+): swap the tooltip reference (so the next hover is
+fresh) **and** flash a 4-second `setStatusBarMessage` ack like
+`✓ DeepSeek balance: ¥11.81` next to the status bar. The ack is the
+immediate feedback the user gets without re-hovering. Tracked with a
+TODO in `flashRefreshAck()`; if VS Code ever exposes an imperative
+hover-refresh API, switch to that.
+
+The silent background-refresh path (debounced after each chat completion)
+does not flash an ack — it just swaps the tooltip ref so the next hover is
+current.
 
 ## Background balance refresh
 
