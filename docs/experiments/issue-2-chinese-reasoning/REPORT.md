@@ -187,6 +187,8 @@ Condition C:
 | Native-CoT slightly beats EN-CoT for Chinese on PaLM-540B (Shi et al. 2022) | DS V4 quality regression is +6.7% in C — opposite direction — but the regression is driven by language-mismatch UX rather than by reasoning errors. |
 | Language-mixed CoT with English anchoring outperforms forced single-language CoT (Shi et al. 2022) | Indirect support: B's effective inertness suggests the model self-selects an appropriate language and resists being forced. |
 | Injecting a new system prompt necessarily changes the cache prefix ([DS KV cache doc](https://api-docs.deepseek.com/guides/kv_cache)) | Cache hit rate drops -12.4pp (B) and -12.4pp (C), **fully confirmed**. |
+| Chinese is *not* more efficient than English on coding tasks across 3 commercial models — MiniMax-2.7 is 1.28× more expensive in Chinese, GPT-5.4-mini 1.09× more expensive, GLM-5 only 0.98× (essentially even); problem-solving rate is 4.5–9.9pp **lower** in Chinese for all three ([Mythbuster, arxiv 2604.14210, 2026](https://arxiv.org/html/2604.14210v1)) | Strongest single piece of external evidence against issue #2's "1.5–2× saving" claim. The issue's specific 1.5–2× number has no traceable primary source; the most directly relevant 2026 empirical study finds the opposite direction. |
+| Reasoning in non-English languages can save tokens *and* preserve accuracy on reasoning models (DeepSeek R1, Qwen 2.5/3) when the prompt itself is in that language — DeepSeek R1 saves up to 29.9% (Spanish), Qwen 3 up to 73% (Korean) ([EfficientXLang, Microsoft Research, 2025](https://arxiv.org/pdf/2507.00246)) | Conditional support: yes, non-English reasoning *can* save tokens, but the test setup is **prompt-language-native**, not system-prompt-steering. Chinese is not the most efficient language in their results. Our v3 setup tests steering, not native-language prompts, so EfficientXLang's positive findings do not transfer to the issue #2 proposal. |
 
 ## 6. Cross-check against the parallel `experiments/` work (v2)
 
@@ -254,6 +256,8 @@ During this experiment a parallel benchmark run by an unrelated process (an MCP 
 ## 9. References
 
 - [Shi, F. et al. (2022). Language Models are Multilingual Chain-of-Thought Reasoners. arXiv:2210.03057.](https://arxiv.org/pdf/2210.03057) — Table 3 Native-CoT vs EN-CoT data
+- [Mythbuster: Chinese Language Is Not More Efficient Than English in Vibe Coding (arxiv 2604.14210, 2026)](https://arxiv.org/html/2604.14210v1) — empirical refutation of the "Chinese is cheaper" claim across 3 commercial models, including problem-solving rate comparison
+- [EfficientXLang: Towards Improving Token Efficiency Through Cross-Lingual Reasoning (Microsoft Research, 2025)](https://arxiv.org/pdf/2507.00246) — conditional positive finding: non-English reasoning can save tokens on reasoning models when the prompt itself is in that language (not when steered via system prompt)
 - [DeepSeek Token Usage doc (official)](https://api-docs.deepseek.com/quick_start/token_usage) — character-to-token conversion ratios
 - [DeepSeek KV Cache doc (official)](https://api-docs.deepseek.com/guides/kv_cache) — full-prefix-match cache mechanism
 - [DeepSeek Thinking Mode doc (official)](https://api-docs.deepseek.com/guides/thinking_mode) — `reasoning_effort` parameter semantics
