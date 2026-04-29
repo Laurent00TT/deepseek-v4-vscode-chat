@@ -3,7 +3,7 @@
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
 	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat.",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"icon": "assets/icon.png",
 	"author": {
 		"name": "Laurent00TT",
@@ -70,6 +70,24 @@
 				"title": "Show DeepSeek V4 Reasoning Cache Stats"
 			}
 		],
+		"configuration": {
+			"title": "DeepSeek V4",
+			"properties": {
+				"deepseekv4.reasoningEffort": {
+					"type": "string",
+					"enum": [
+						"high",
+						"max"
+					],
+					"enumDescriptions": [
+						"Faster responses with shorter reasoning chains.",
+						"Maximum reasoning depth; slower and uses more tokens."
+					],
+					"default": "max",
+					"markdownDescription": "Reasoning effort for `(thinking)` model variants. Has no effect on non-thinking variants. See [DeepSeek docs](https://api-docs.deepseek.com/guides/thinking_mode)."
+				}
+			}
+		},
 		"walkthroughs": [
 			{
 				"id": "deepseekv4GettingStarted",

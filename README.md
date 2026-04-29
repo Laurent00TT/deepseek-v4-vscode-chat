@@ -63,6 +63,12 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | `Show DeepSeek V4 Reasoning Cache Stats` | Diagnostics for the reasoning cache |
 | `Clear DeepSeek V4 Session Counter` | Reset the session spend display |
 
+## Settings
+
+| Setting | Values | Default | Description |
+| ------ | ------ | ------ | ------ |
+| `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for `(thinking)` model variants. `high` is faster with shorter reasoning chains; `max` is the deepest setting. No effect on non-thinking variants. Picked up at request time. |
+
 ## License
 
 MIT. See [LICENSE](./LICENSE). Forked from [huggingface-vscode-chat](https://github.com/huggingface/huggingface-vscode-chat); the protocol layer was rewritten for DeepSeek V4.
