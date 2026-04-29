@@ -5,7 +5,7 @@ the bottom of the chat input. You will see four DeepSeek V4 variants:
 
 | Variant | Best for |
 |---|---|
-| **DeepSeek V4 Pro (thinking)** | Complex agent tasks, deep reasoning at max effort |
+| **DeepSeek V4 Pro (thinking)** | Complex agent tasks, deep reasoning (effort tunable, see next step) |
 | **DeepSeek V4 Pro** | Strong coding without the thinking-mode latency |
 | **DeepSeek V4 Flash (thinking)** | Cheapest path to extended thinking |
 | **DeepSeek V4 Flash** | Fast everyday edits, lowest cost |

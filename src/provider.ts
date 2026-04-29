@@ -533,6 +533,16 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		}
 
 		md.appendMarkdown("---\n\n");
+
+		// Reasoning effort row: shows the current setting value plus a click-
+		// through to the specific setting. Helps discoverability — users who
+		// hover the status bar to check cost will also notice this control.
+		const currentEffort = vscode.workspace
+			.getConfiguration("deepseekv4")
+			.get<string>("reasoningEffort", "max");
+		md.appendMarkdown(
+			`**Reasoning effort** &nbsp; \`${currentEffort}\` &nbsp; [$(gear) configure](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)\n\n`,
+		);
 		md.appendMarkdown("[View full log](command:deepseekv4.showLog)");
 
 		return md;

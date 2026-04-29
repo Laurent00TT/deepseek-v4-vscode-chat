@@ -112,6 +112,14 @@
 						"media": {
 							"markdown": "resources/walkthrough/pick-model.md"
 						}
+					},
+					{
+						"id": "tuneReasoningEffort",
+						"title": "Tune reasoning effort (optional)",
+						"description": "Switch between `high` (faster, lighter) and `max` (default, deepest) for `(thinking)` variants. Effect is global and applies to the next message.\n[Open Reasoning Effort Setting](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)",
+						"media": {
+							"markdown": "resources/walkthrough/tune-effort.md"
+						}
 					}
 				]
 			}

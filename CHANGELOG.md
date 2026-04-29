@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   for faster, lighter responses on simple chat without changing models. Has
   no effect on non-thinking variants. Reads at request time, so changes apply
   to the next message without reloading.
+- Status-bar tooltip now shows the current `reasoning_effort` value with a
+  click-through link that opens the setting directly. Improves discoverability
+  for the new option without intrusive notifications.
+- Walkthrough adds a third step (**Tune reasoning effort (optional)**) that
+  introduces the new setting to first-time users with a one-click link to the
+  setting and a brief explanation of `high` vs `max`.
+- Per-request `[req] reasoning_effort=<value> (variant=<id>)` log line in the
+  output channel, so users and developers can confirm at a glance which
+  effort each request is sending.
 
 ### Changed
 
