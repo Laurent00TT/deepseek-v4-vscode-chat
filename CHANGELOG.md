@@ -59,8 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `usage` log line now includes the running `chars_per_token` estimate.
 - `processStreamingResponse` no longer needs the post-stream cleanup block
   that reset shared instance state — `ctx` simply goes out of scope.
-- Manual balance refresh now flashes a transient `$(check) DeepSeek balance:
-  ¥xx.xx` message next to the status-bar item, so the user sees the new
+- Manual balance refresh now flashes a transient `$(check) DeepSeek balance: ¥xx.xx` message next to the status-bar item, so the user sees the new
   value immediately even when the click closes the hover popup. The next
   hover re-reads the (already-swapped) tooltip and shows fresh data. We
   experimented with a dispose+recreate trick to force the popup to close
