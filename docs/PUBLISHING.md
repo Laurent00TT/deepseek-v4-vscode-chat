@@ -93,7 +93,7 @@ This automatically:
 
 ### 3. Update the CHANGELOG
 
-Move the `[Unreleased]` items into the new version heading, add a date, then amend:
+Move the items currently grouped above the latest released version (under the `[released]` banner) into the new version heading, add a date, then amend:
 
 ```bash
 # Edit CHANGELOG.md, then

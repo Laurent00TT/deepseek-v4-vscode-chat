@@ -200,6 +200,8 @@ A 20 MB cap with a 16-char text hash leaves the serialized payload well below VS
 }
 ```
 
+The `reasoning_effort` value is read at request time from the `deepseekv4.reasoningEffort` user setting (default `max`). It is sent only when the variant has `thinking: true`. Per-request `[req] reasoning_effort=...` is logged to the output channel for observability.
+
 In thinking mode DeepSeek ignores `temperature`, `top_p`, `presence_penalty`, and `frequency_penalty`. We omit them from the request body to keep it clean (better prompt-cache hit rate).
 
 ### Usage capture

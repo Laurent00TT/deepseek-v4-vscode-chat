@@ -8,7 +8,7 @@ Native DeepSeek V4 (Pro / Flash) provider for VS Code Copilot Chat — with full
 ## Features
 
 - Four model variants in the Copilot model picker: **Pro (thinking)**, **Pro**, **Flash (thinking)**, **Flash**
-- Extended thinking at max effort, with the full reasoning chain preserved across multi-turn agent loops
+- Extended thinking with configurable effort (`high` / `max`, see [Settings](#settings)) and full reasoning chain preserved across multi-turn agent loops
 - Agent-mode tool calling that does not break on the second turn
 - Status bar with live account balance and session spend (auto-detects CNY / USD)
 - Background balance refresh after each chat (debounced, silent)
