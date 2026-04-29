@@ -5,7 +5,26 @@ All notable changes to this project will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [released]
+
+## [0.3.1] - 2026-04-29
+
+### Added
+
+- New integration test `test/integration_tools_advertised_no_tc.mjs` covering the
+  corner case where `tools` is advertised in the request but the conversation
+  history contains no `assistant.tool_calls` turn. Confirms that DeepSeek does
+  NOT require `reasoning_content` round-trip in this case, refining the previous
+  understanding that "tools advertised → all turns must round-trip".
+
+### Changed
+
+- Fingerprint doc comment in `src/reasoning_cache.ts` now describes the actual
+  trigger condition for `reasoning_content` round-trip (history contains an
+  `assistant.tool_calls` turn) instead of the previous over-strong wording
+  (tools advertised in the request). Behavior is unchanged: the existing
+  "round-trip every assistant turn that has reasoning" strategy is a strict
+  superset of the real rule, so the API never sees a missing `reasoning_content`.
 
 ## [0.3.0] - 2026-04-28
 

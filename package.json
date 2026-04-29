@@ -3,7 +3,7 @@
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
 	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat.",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"icon": "assets/icon.png",
 	"author": {
 		"name": "Laurent00TT",
