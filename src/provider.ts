@@ -957,6 +957,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				// arbitrary strings to the API.
 				const effort: "high" | "max" = raw === "high" ? "high" : "max";
 				(requestBody as Record<string, unknown>).reasoning_effort = effort;
+				this.outputChannel.appendLine(`[req] reasoning_effort=${effort} (variant=${variant.id})`);
 				// Per DeepSeek docs: temperature/top_p/penalty params are ignored
 				// in thinking mode. We omit them to keep the request body honest.
 			} else {
