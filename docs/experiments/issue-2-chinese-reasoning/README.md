@@ -7,10 +7,14 @@
 
 ## 一句话概述
 
-我们用 N=100 trials 的预注册实验验证作者方案,**所有三项关键指标均不达标**:
-- 指令服从度 34.8%(门槛 ≥50%)
-- Token saving −4%(门槛 ≥10%)
-- KV cache 命中率额外下降 9.9pp
+我们用 **N=150 trials** 的预注册实验(三条件 ablation)+ **30 trials blind 质量评分**验证作者方案及其变体:
+- **Condition A**(无 steering,基线)
+- **Condition B**(英文 system prompt steering,作者原方案)→ **REJECT**(compliance 36.0% < 50%,指令无效)
+- **Condition C**(中文 system prompt steering,我们补充的 ablation)→ **REJECT**(token saving +0.8% < 10%,且引入"英文 prompt 被中文回答"的 UX 副作用)
+
+**两个条件均 REJECT,但失败维度不同**。质量评分 A=3.00 / B=2.90 / C=2.80(0-3 量表),回退均 < 10%,远低于 20% 门槛,质量不是 reject 原因。
+
+详细数据与决策见 [REPORT.md](./REPORT.md)。
 
 ## 文件结构
 
@@ -18,33 +22,46 @@
 |---|---|
 | [`REPORT.md`](./REPORT.md) | 完整中文报告(背景、方法、数据、文献对照、结论) |
 | [`experiment_chinese_reasoning.mjs`](./experiment_chinese_reasoning.mjs) | 实验脚本(产生原始数据);**预注册决策矩阵在文件顶部注释** |
-| [`analyze_experiment.py`](./analyze_experiment.py) | 分析脚本(从 jsonl 算 summary + Wilcoxon p + bootstrap CI) |
-| [`score_blind.mjs`](./score_blind.mjs) | Blind 质量评分工具(本次未用,因为决策已在 compliance 这一关被 reject) |
+| [`analyze_experiment.py`](./analyze_experiment.py) | 主指标分析(token / compliance / cache + 决策矩阵) |
+| [`prep_blind_scoring.py`](./prep_blind_scoring.py) | Blind 评分样本生成器(stratified sample + 屏蔽 condition) |
+| [`analyze_blind_scores.py`](./analyze_blind_scores.py) | 评分对齐 condition 后的质量回退报告 |
+| [`score_blind.mjs`](./score_blind.mjs) | 交互式评分工具(本次走 Python 路径,该 mjs 备用) |
 | [`data/*.jsonl`](./data) | 原始数据(每行一个 trial,含完整 reasoning_content + content + usage) |
+| [`data/scores_blind.json`](./data/scores_blind.json) | 30 trials blind 评分结果 + 评分理由 |
+| [`data/blind_scoring_key.json`](./data/blind_scoring_key.json) | trial_index → condition 对应表 |
+| [`data/blind_scoring_sample.md`](./data/blind_scoring_sample.md) | 评分时实际看到的 blind 样本 |
 
 ## 数据文件
 
 | 文件 | 说明 |
 |---|---|
-| `data/experiment_chinese_reasoning_2026-04-29T05-23-43.jsonl` | **主数据**:full run, N=10 reps × 5 prompts × 2 conditions = 100 trials |
-| `data/experiment_chinese_reasoning_2026-04-29T04-33-13_quick.jsonl` | Smoke test 通过版(N=2,验证脚本工作正常) |
-| `data/experiment_chinese_reasoning_2026-04-29T04-22-23_quick.jsonl` | Smoke test 全 401 版(API key 失效那次,保留作审计 trail) |
+| `data/experiment_chinese_reasoning_2026-04-29T07-51-18.jsonl` | **v3 主数据**:N=10 × 5 prompts × 3 conditions = **150 trials**(149 OK + 1 net err) |
+| `data/experiment_chinese_reasoning_2026-04-29T05-23-43.jsonl` | v1 早期数据:N=10 × 5 prompts × 2 conditions = 100 trials(无 condition C) |
+| `data/experiment_chinese_reasoning_2026-04-29T06-34-43_quick.jsonl` | v3 smoke(N=2,3 条件脚本验证) |
+| `data/experiment_chinese_reasoning_2026-04-29T06-18-01_quick.jsonl` | v3 smoke 全 401(API key 失效) |
+| `data/experiment_chinese_reasoning_2026-04-29T04-33-13_quick.jsonl` | v1 smoke 通过(N=2,初版双条件) |
+| `data/experiment_chinese_reasoning_2026-04-29T04-22-23_quick.jsonl` | v1 smoke 全 401(更早一次 key 失效) |
 
 ## 复现命令
 
 ```bash
-# 1. 跑完整实验(需要 DEEPSEEK_API_KEY,~50 分钟,~¥3-5 成本)
+# 1. 跑完整实验(需要 DEEPSEEK_API_KEY,~70 分钟 / 150 trials)
 DEEPSEEK_API_KEY=sk-... node docs/experiments/issue-2-chinese-reasoning/experiment_chinese_reasoning.mjs
 
-# 2. 分析数据
+# 2. 主指标分析(token / compliance / cache + 决策矩阵)
 python docs/experiments/issue-2-chinese-reasoning/analyze_experiment.py \
     docs/experiments/issue-2-chinese-reasoning/data/<jsonl-file>
 
-# 3. (可选)blind 质量评分
+# 3. Blind 质量评分(可选,用 Python 路径)
+python docs/experiments/issue-2-chinese-reasoning/prep_blind_scoring.py \
+    docs/experiments/issue-2-chinese-reasoning/data/<jsonl-file>
+# 评分者读 data/blind_scoring_sample.md,把分数写到 data/scores_blind.json
+python docs/experiments/issue-2-chinese-reasoning/analyze_blind_scores.py \
+    docs/experiments/issue-2-chinese-reasoning/data/<jsonl-file>
+
+# 4. (备选) 交互式评分工具
 node docs/experiments/issue-2-chinese-reasoning/score_blind.mjs \
     docs/experiments/issue-2-chinese-reasoning/data/<jsonl-file>
-node docs/experiments/issue-2-chinese-reasoning/score_blind.mjs \
-    docs/experiments/issue-2-chinese-reasoning/data/<jsonl-file> --analyze
 ```
 
 ## 这次探索的方法学要点
@@ -58,14 +75,17 @@ node docs/experiments/issue-2-chinese-reasoning/score_blind.mjs \
 
 ## 给未来扩展实验的建议
 
-如果未来有人想重启这个方向,以下是本次未做但有价值的扩展:
+本次 v3 已经覆盖:
+- ✅ 中文写就的 Chinese-steering prompt(Condition C)
+- ✅ Blind 质量评分(score_blind.mjs)
 
-- **测试中文写就的 Chinese-steering prompt**(本次照搬作者英文版)
-- **测试把指令放在 user message 里**(本次只测 system prompt 位置)
+仍未覆盖、值得未来探索的方向:
+
+- **测试把指令放在 user message 里**(本次三个条件都在 system prompt 位置)
 - **覆盖 agent 多轮工具调用场景**(本次只覆盖单轮简单任务)
 - **测试不同 model variant**(本次只测 deepseek-v4-pro,未测 flash)
-- **更大的 N**(本次 N=10,统计功效仅够检测 ≥10pp 的效应)
-- **加入 quality 评分**(本次因 compliance 已 reject,未做 blind scoring;若要做完整评估,需要补)
+- **测试不同 effort**(本次只测 max,v2 测了 high,值得正式做 effort × steering 因子)
+- **更大的 prompt 集**(本次 5 个偏简单,可借鉴 v2 的 9 个复杂场景重做)
 
 ## 关于"探索"标签
 

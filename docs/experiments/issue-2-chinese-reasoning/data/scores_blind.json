@@ -1,0 +1,48 @@
+{
+  "_meta": {
+    "scorer": "Claude (assistant)",
+    "scored_at": "2026-04-29",
+    "rubric": "0=wrong, 1=correct but confusing, 2=correct+complete, 3=correct+complete+clear explanation",
+    "blind": true,
+    "blinded_fields": ["condition", "rep", "reasoning_content"],
+    "visible_fields": ["prompt_id (task type only)", "user question", "model answer (content)"],
+    "notes": "Scores assigned without consulting blind_scoring_key.json. Rationale for non-3 scores documented inline below."
+  },
+  "scores": {
+    "0":  3,
+    "1":  3,
+    "2":  3,
+    "3":  3,
+    "4":  2,
+    "5":  3,
+    "6":  3,
+    "7":  3,
+    "8":  3,
+    "9":  3,
+    "10": 3,
+    "11": 3,
+    "12": 3,
+    "13": 3,
+    "14": 3,
+    "15": 3,
+    "16": 3,
+    "17": 3,
+    "18": 3,
+    "19": 2,
+    "20": 3,
+    "21": 3,
+    "22": 3,
+    "23": 3,
+    "24": 3,
+    "25": 3,
+    "26": 2,
+    "27": 3,
+    "28": 3,
+    "29": 3
+  },
+  "rationale_for_non_3": {
+    "4":  "Minimal binary_search implementation: code is correct but lacks docstring, examples, and explanation that all other binary_search trials include. Demoted from 3 to 2 because comprehensiveness is part of the rubric distinction between 2 and 3.",
+    "19": "User asked in English (merge_sort prompt) but the model's prose answer is in Chinese. Code itself is correct; explanation in Chinese is a UX/language-mismatch issue. Demoted to 2 because clarity-for-the-asker is degraded.",
+    "26": "Same as 19: en_debug prompt in English, Chinese answer. Bug correctly identified and fixed, but language mismatch makes it less helpful for the asker. Demoted to 2."
+  }
+}

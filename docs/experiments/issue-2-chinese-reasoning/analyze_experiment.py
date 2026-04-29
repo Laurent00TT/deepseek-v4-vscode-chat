@@ -92,14 +92,16 @@ def main():
 
     prompt_ids = sorted({t["prompt_id"] for t in ok_trials})
 
+    conditions = sorted({t["condition"] for t in ok_trials})
+
     # ─── Per-prompt × condition: reasoning_tokens ───────────────────────────
-    print("=" * 90)
+    print("=" * 100)
     print("Reasoning tokens per (prompt × condition)")
-    print("=" * 90)
+    print("=" * 100)
     print(f"{'prompt_id':<22} {'cond':<5} {'n':>3} {'min':>5} {'p25':>5} {'med':>5} {'p75':>5} {'max':>5} {'mean':>6} {'std':>5}")
-    print("-" * 90)
+    print("-" * 100)
     for pid in prompt_ids:
-        for cond in ("A", "B"):
+        for cond in conditions:
             xs = [t["reasoning_tokens"] for t in by_pc[(pid, cond)]]
             if not xs:
                 continue
@@ -108,108 +110,130 @@ def main():
             sd = statistics.stdev(xs) if len(xs) > 1 else 0
             print(f"{pid:<22} {cond:<5} {len(xs):>3} {s[0]:>5} {quantile(xs, 0.25):>5.0f} {median(xs):>5.0f} {quantile(xs, 0.75):>5.0f} {s[-1]:>5} {mean:>6.0f} {sd:>5.0f}")
 
-    # ─── Per-prompt: A vs B comparison ──────────────────────────────────────
+    # ─── Pairwise comparisons vs baseline (A) ───────────────────────────────
+    # For each non-A condition, compare against A on token count and zh_ratio.
     print()
-    print("=" * 90)
-    print("A vs B comparison (paired by rep)")
-    print("=" * 90)
-    print(f"{'prompt_id':<22} {'A_med':>6} {'B_med':>6} {'Δmed%':>8} {'A_zh%':>7} {'B_zh%':>7} {'Δzh':>6}  Wilcoxon (p)")
-    print("-" * 90)
-    per_prompt_token_deltas = []
-    per_prompt_compliance_deltas = []
-    direction_b_lower = 0
-    for pid in prompt_ids:
-        a = sorted(by_pc[(pid, "A")], key=lambda t: t["rep"])
-        b = sorted(by_pc[(pid, "B")], key=lambda t: t["rep"])
-        a_tok = [t["reasoning_tokens"] for t in a]
-        b_tok = [t["reasoning_tokens"] for t in b]
-        a_zh = [t["reasoning_zh_ratio"] for t in a]
-        b_zh = [t["reasoning_zh_ratio"] for t in b]
-        med_a = median(a_tok)
-        med_b = median(b_tok)
-        delta = (med_b - med_a) / med_a * 100 if med_a > 0 else 0
-        per_prompt_token_deltas.append(delta)
-        if delta < 0:
-            direction_b_lower += 1
-        zh_a = sum(a_zh) / len(a_zh) * 100
-        zh_b = sum(b_zh) / len(b_zh) * 100
-        per_prompt_compliance_deltas.append(zh_b - zh_a)
-        n = min(len(a_tok), len(b_tok))
-        if n >= 6:
-            _, p = wilcoxon_signed_rank(a_tok[:n], b_tok[:n])
-            p_str = f"p={p:.3f}" if p is not None else "n/a"
-        else:
-            p_str = "n<6"
-        print(f"{pid:<22} {med_a:>6.0f} {med_b:>6.0f} {delta:>+7.1f}% {zh_a:>6.0f}% {zh_b:>6.0f}% {(zh_b - zh_a):>+5.0f}pp  {p_str}")
-    print("-" * 90)
-    overall_med_delta = median(per_prompt_token_deltas)
-    overall_mean_delta = sum(per_prompt_token_deltas) / len(per_prompt_token_deltas)
-    print(f"{'OVERALL':<22}                  Δmed={overall_med_delta:+.1f}%  Δmean={overall_mean_delta:+.1f}%  direction(B<A)={direction_b_lower}/{len(prompt_ids)}")
+    print("=" * 100)
+    print("Pairwise comparisons against baseline A (paired by rep within prompt)")
+    print("=" * 100)
+    per_cond_token_deltas = {c: [] for c in conditions if c != "A"}
+    per_cond_zh_deltas = {c: [] for c in conditions if c != "A"}
+    direction_lower = {c: 0 for c in conditions if c != "A"}
+    for cond in conditions:
+        if cond == "A":
+            continue
+        print(f"\n--- Condition {cond} vs A ---")
+        print(f"{'prompt_id':<22} {'A_med':>6} {f'{cond}_med':>7} {'Δmed%':>8} {'A_zh%':>7} {f'{cond}_zh%':>8} {'Δzh':>6}  Wilcoxon (p)")
+        print("-" * 90)
+        for pid in prompt_ids:
+            a = sorted(by_pc[(pid, "A")], key=lambda t: t["rep"])
+            x = sorted(by_pc[(pid, cond)], key=lambda t: t["rep"])
+            if not a or not x:
+                continue
+            a_tok = [t["reasoning_tokens"] for t in a]
+            x_tok = [t["reasoning_tokens"] for t in x]
+            a_zh = [t["reasoning_zh_ratio"] for t in a]
+            x_zh = [t["reasoning_zh_ratio"] for t in x]
+            med_a = median(a_tok)
+            med_x = median(x_tok)
+            delta = (med_x - med_a) / med_a * 100 if med_a > 0 else 0
+            per_cond_token_deltas[cond].append(delta)
+            if delta < 0:
+                direction_lower[cond] += 1
+            zh_a = sum(a_zh) / len(a_zh) * 100
+            zh_x = sum(x_zh) / len(x_zh) * 100
+            per_cond_zh_deltas[cond].append(zh_x - zh_a)
+            n = min(len(a_tok), len(x_tok))
+            if n >= 6:
+                _, p = wilcoxon_signed_rank(a_tok[:n], x_tok[:n])
+                p_str = f"p={p:.3f}" if p is not None else "n/a"
+            else:
+                p_str = "n<6"
+            print(f"{pid:<22} {med_a:>6.0f} {med_x:>7.0f} {delta:>+7.1f}% {zh_a:>6.0f}% {zh_x:>7.0f}% {(zh_x - zh_a):>+5.0f}pp  {p_str}")
+        ds = per_cond_token_deltas[cond]
+        zhs = per_cond_zh_deltas[cond]
+        if ds:
+            print("-" * 90)
+            print(f"  {cond} OVERALL: Δmed mean={sum(ds)/len(ds):+.1f}%, direction({cond}<A)={direction_lower[cond]}/{len(ds)}, Δzh mean={sum(zhs)/len(zhs):+.1f}pp")
 
     # ─── Compliance distribution ─────────────────────────────────────────────
     print()
     print("=" * 90)
     print("Compliance distribution: fraction of trials where reasoning_zh_ratio crosses threshold")
     print("=" * 90)
-    a_all = [t for t in ok_trials if t["condition"] == "A"]
-    b_all = [t for t in ok_trials if t["condition"] == "B"]
-    print(f"{'threshold':<12} {'A frac':>10} {'B frac':>10}")
+    by_cond_all = {c: [t for t in ok_trials if t["condition"] == c] for c in conditions}
+    header = f"{'threshold':<12}" + "".join(f"  {c} frac".rjust(11) for c in conditions)
+    print(header)
     for thr in (0.10, 0.30, 0.50, 0.70, 0.90):
-        a_frac = sum(1 for t in a_all if t["reasoning_zh_ratio"] >= thr) / len(a_all)
-        b_frac = sum(1 for t in b_all if t["reasoning_zh_ratio"] >= thr) / len(b_all)
-        print(f"≥ {thr:<10.2f} {a_frac * 100:>9.0f}% {b_frac * 100:>9.0f}%")
+        row = f"≥ {thr:<10.2f}"
+        for c in conditions:
+            xs = by_cond_all[c]
+            frac = sum(1 for t in xs if t["reasoning_zh_ratio"] >= thr) / len(xs) * 100 if xs else 0
+            row += f"  {frac:>8.0f}%".rjust(11)
+        print(row)
 
-    # ─── Overall stats ───────────────────────────────────────────────────────
+    # ─── Overall stats per condition ─────────────────────────────────────────
     print()
     print("=" * 90)
-    print("Overall pooled statistics")
+    print("Overall pooled statistics per condition")
     print("=" * 90)
-    a_tok_all = [t["reasoning_tokens"] for t in a_all]
-    b_tok_all = [t["reasoning_tokens"] for t in b_all]
-    a_zh_all = [t["reasoning_zh_ratio"] for t in a_all]
-    b_zh_all = [t["reasoning_zh_ratio"] for t in b_all]
-    print(f"  A: n={len(a_tok_all)}  reasoning_tokens median={median(a_tok_all):.0f}  mean={sum(a_tok_all)/len(a_tok_all):.0f}  zh%={sum(a_zh_all)/len(a_zh_all)*100:.1f}%")
-    print(f"  B: n={len(b_tok_all)}  reasoning_tokens median={median(b_tok_all):.0f}  mean={sum(b_tok_all)/len(b_tok_all):.0f}  zh%={sum(b_zh_all)/len(b_zh_all)*100:.1f}%")
+    cond_overall = {}
+    for c in conditions:
+        toks = [t["reasoning_tokens"] for t in by_cond_all[c]]
+        zhs = [t["reasoning_zh_ratio"] for t in by_cond_all[c]]
+        cond_overall[c] = {
+            "n": len(toks),
+            "tok_median": median(toks),
+            "tok_mean": sum(toks) / len(toks) if toks else 0,
+            "zh_mean_pct": sum(zhs) / len(zhs) * 100 if zhs else 0,
+        }
+        print(f"  {c}: n={cond_overall[c]['n']}  reasoning_tokens median={cond_overall[c]['tok_median']:.0f}  mean={cond_overall[c]['tok_mean']:.0f}  zh%={cond_overall[c]['zh_mean_pct']:.1f}%")
 
-    # ─── Bootstrap CI for per-prompt mean delta ──────────────────────────────
-    if len(per_prompt_token_deltas) >= 3:
-        lo, hi = bootstrap_ci(per_prompt_token_deltas)
-        print(f"  Per-prompt mean Δ% bootstrap 95% CI: [{lo:+.1f}%, {hi:+.1f}%]")
+    # Bootstrap CIs for each non-A condition's mean Δ%
+    for c in conditions:
+        if c == "A":
+            continue
+        ds = per_cond_token_deltas.get(c, [])
+        if len(ds) >= 3:
+            lo, hi = bootstrap_ci(ds)
+            print(f"  Per-prompt mean Δ% ({c} vs A) bootstrap 95% CI: [{lo:+.1f}%, {hi:+.1f}%]")
 
     # ─── Cache impact ────────────────────────────────────────────────────────
     print()
     print("=" * 90)
-    print("Cache hit/miss tokens (first request typically misses; later requests may hit)")
+    print("Cache hit/miss tokens (first request typically misses; stable prefix → hits)")
     print("=" * 90)
-    a_hit = sum(t.get("cache_hit_tokens", 0) for t in a_all)
-    a_miss = sum(t.get("cache_miss_tokens", 0) for t in a_all)
-    b_hit = sum(t.get("cache_hit_tokens", 0) for t in b_all)
-    b_miss = sum(t.get("cache_miss_tokens", 0) for t in b_all)
-    a_total_pt = a_hit + a_miss
-    b_total_pt = b_hit + b_miss
-    print(f"  A: total prompt tokens={a_total_pt}  hit={a_hit} ({a_hit/a_total_pt*100 if a_total_pt else 0:.1f}%)  miss={a_miss}")
-    print(f"  B: total prompt tokens={b_total_pt}  hit={b_hit} ({b_hit/b_total_pt*100 if b_total_pt else 0:.1f}%)  miss={b_miss}")
+    for c in conditions:
+        xs = by_cond_all[c]
+        hit = sum(t.get("cache_hit_tokens", 0) for t in xs)
+        miss = sum(t.get("cache_miss_tokens", 0) for t in xs)
+        total = hit + miss
+        rate = hit / total * 100 if total else 0
+        print(f"  {c}: total prompt tokens={total}  hit={hit} ({rate:.1f}%)  miss={miss}")
 
-    # ─── Apply pre-registered decision matrix ────────────────────────────────
+    # ─── Apply pre-registered decision matrix to each non-A condition ─────────
     print()
     print("=" * 90)
     print("Pre-registered decision matrix application")
     print("=" * 90)
-    overall_compliance = sum(b_zh_all) / len(b_zh_all) * 100  # mean Chinese ratio in B
-    overall_token_saving = -overall_mean_delta  # positive = saved
-    print(f"  Overall B compliance (mean zh%): {overall_compliance:.1f}%")
-    print(f"  Overall token saving (per-prompt mean Δ negated): {overall_token_saving:+.1f}%")
-    print(f"  Quality regression: TBD (manual blind scoring required)")
-    print()
-    if overall_compliance < 50:
-        print(f"  → REJECT: instruction ignored (compliance < 50%)")
-    elif overall_token_saving < 10:
-        print(f"  → REJECT: no tangible benefit (token saving < 10%)")
-    elif overall_compliance >= 70 and overall_token_saving >= 20:
-        print(f"  → POTENTIAL ACCEPT: pending quality regression check (must be ≤10%)")
-    else:
-        print(f"  → INCONCLUSIVE: signals don't cleanly meet ACCEPT or REJECT thresholds")
-
+    for c in conditions:
+        if c == "A":
+            continue
+        compliance = cond_overall[c]["zh_mean_pct"]
+        ds = per_cond_token_deltas.get(c, [])
+        token_saving = -sum(ds) / len(ds) if ds else 0  # positive = saved
+        print(f"\n  Condition {c}:")
+        print(f"    Compliance (mean zh%):        {compliance:.1f}%")
+        print(f"    Token saving (Δ negated):     {token_saving:+.1f}%")
+        print(f"    Quality regression: TBD (manual blind scoring required)")
+        if compliance < 50:
+            print(f"    → REJECT: instruction ignored (compliance < 50%)")
+        elif token_saving < 10:
+            print(f"    → REJECT: no tangible benefit (token saving < 10%)")
+        elif compliance >= 70 and token_saving >= 20:
+            print(f"    → POTENTIAL ACCEPT: pending quality regression check (must be ≤10%)")
+        else:
+            print(f"    → INCONCLUSIVE: signals don't cleanly meet ACCEPT or REJECT thresholds")
 
 if __name__ == "__main__":
     main()

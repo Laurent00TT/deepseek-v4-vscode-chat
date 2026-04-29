@@ -2,7 +2,8 @@
 // system prompt actually steer DS V4's reasoning_content language, save tokens,
 // and not regress quality?
 //
-// PRE-REGISTERED DECISION MATRIX (locked before running, do NOT modify after):
+// PRE-REGISTERED DECISION MATRIX (locked before running, do NOT modify after).
+// Applied INDEPENDENTLY to each non-baseline condition vs A:
 //
 //   Compliance       Token saving    Quality reg.   Decision
 //   ─────────────    ────────────    ───────────    ────────────────────
@@ -12,13 +13,19 @@
 //   ≥70% Chinese     ≥20%            ≤10%           ACCEPT (implement opt-in)
 //   anything else                                   INCONCLUSIVE (close with report)
 //
-// Definitions:
+// Definitions (X = the condition being evaluated, e.g. B or C):
 //   - "Compliance"  := mean ratio of Chinese characters in reasoning_content
-//                     across the 25 condition-B trials (5 prompts × 5 reps).
-//   - "Token saving" := (mean_A_reasoning_tokens - mean_B_reasoning_tokens)
+//                     across the 50 condition-X trials (5 prompts × 10 reps).
+//   - "Token saving" := (mean_A_reasoning_tokens - mean_X_reasoning_tokens)
 //                       / mean_A_reasoning_tokens, averaged across prompts.
-//   - "Quality reg." := mean drop in 0-3 quality score from A to B, scored
+//   - "Quality reg." := mean drop in 0-3 quality score from A to X, scored
 //                       MANUALLY after the run, blind to condition.
+//
+// CONDITIONS:
+//   - A: baseline, only Copilot-like English system prompt
+//   - B: A + English-language Chinese-steering prompt prepended (issue #2 verbatim)
+//   - C: A + Chinese-language Chinese-steering prompt prepended (v3 ablation:
+//        does the LANGUAGE of the steering instruction matter?)
 //
 // What this experiment does NOT control for:
 //   - The exact text of Copilot Chat's real system prompt is closed-source;
@@ -32,6 +39,8 @@
 //   - Quality scoring is performed by the same person who wrote the analysis,
 //     introducing potential bias. Mitigations: (a) blind to condition via the
 //     score_blind.mjs helper, (b) raw jsonl preserved for re-scoring by anyone.
+//   - Steering position is fixed (system prompt, before Copilot baseline);
+//     "user message" placement is not tested.
 
 import process from "node:process";
 import fs from "node:fs/promises";
@@ -53,8 +62,15 @@ const COPILOT_LIKE_SYSTEM =
 
 // Verbatim from issue #2 author's proposal. We test their exact text — not a
 // "fixed" version — so the result reflects their actual proposal.
-const CHINESE_STEERING =
+const CHINESE_STEERING_EN =
 	"You MUST think and reason internally in Simplified Chinese (简体中文). Conduct all chain-of-thought, planning, analysis, self-reflection, and tool-use decisions in Chinese.";
+
+// v3 ablation: same intent, but written in Chinese. Tests whether the
+// language of the steering instruction itself matters — many models respond
+// more reliably to instructions in the target language. The semantic content
+// is a faithful Chinese translation of CHINESE_STEERING_EN.
+const CHINESE_STEERING_ZH =
+	"你必须用简体中文进行内部思考和推理。所有思维链、规划、分析、自我反思以及工具使用的决策都必须用中文进行。";
 
 const PROMPTS = [
 	{
@@ -150,10 +166,13 @@ function chineseCharRatio(text) {
 
 async function runOne(prompt, condition, rep) {
 	const messages = [];
+	// Condition A = no steering (baseline)
+	// Condition B = English-language steering instruction (issue #2 author's verbatim proposal)
+	// Condition C = Chinese-language steering instruction (v3 ablation)
 	if (condition === "B") {
-		// Inject Chinese steering BEFORE the Copilot-like baseline.
-		// Putting it first means the model sees it before any English context.
-		messages.push({ role: "system", content: CHINESE_STEERING });
+		messages.push({ role: "system", content: CHINESE_STEERING_EN });
+	} else if (condition === "C") {
+		messages.push({ role: "system", content: CHINESE_STEERING_ZH });
 	}
 	messages.push({ role: "system", content: COPILOT_LIKE_SYSTEM });
 	messages.push({ role: "user", content: prompt.content });
@@ -193,18 +212,20 @@ async function runOne(prompt, condition, rep) {
 
 async function main() {
 	const results = [];
-	const totalCalls = PROMPTS.length * 2 * ACTUAL_REPS;
+	const CONDITIONS = ["A", "B", "C"];
+	const totalCalls = PROMPTS.length * CONDITIONS.length * ACTUAL_REPS;
 	let i = 0;
 
-	console.log(`Running experiment: ${PROMPTS.length} prompts × 2 conditions × ${ACTUAL_REPS} reps = ${totalCalls} calls`);
+	console.log(`Running experiment: ${PROMPTS.length} prompts × ${CONDITIONS.length} conditions × ${ACTUAL_REPS} reps = ${totalCalls} calls`);
+	console.log(`Conditions: A=baseline, B=English steering (issue #2 verbatim), C=Chinese steering (v3 ablation)`);
 	console.log(`Mode: ${QUICK ? "QUICK (smoke test)" : "FULL"}`);
 	console.log("");
 
 	for (const prompt of PROMPTS) {
-		// Interleave A and B reps for each prompt to spread temporal effects
+		// Interleave A/B/C reps for each prompt to spread temporal effects
 		// (e.g., DS server load drift) evenly across conditions.
 		for (let rep = 1; rep <= ACTUAL_REPS; rep++) {
-			for (const condition of ["A", "B"]) {
+			for (const condition of CONDITIONS) {
 				i++;
 				process.stdout.write(`[${i.toString().padStart(3)}/${totalCalls}] ${prompt.id.padEnd(18)} cond=${condition} rep=${rep} ... `);
 				const result = await runOne(prompt, condition, rep);
