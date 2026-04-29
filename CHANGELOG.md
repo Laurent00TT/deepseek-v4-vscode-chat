@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [released]
 
+## [0.3.2] - 2026-04-29
+
+### Added
+
+- New setting `deepseekv4.reasoningEffort` (`"high"` | `"max"`, default `"max"`)
+  to control reasoning depth on `(thinking)` model variants. Switch to `high`
+  for faster, lighter responses on simple chat without changing models. Has
+  no effect on non-thinking variants. Reads at request time, so changes apply
+  to the next message without reloading.
+- Status-bar tooltip now shows the current `reasoning_effort` value with a
+  click-through link that opens the setting directly. Improves discoverability
+  for the new option without intrusive notifications.
+- Walkthrough adds a third step (**Tune reasoning effort (optional)**) that
+  introduces the new setting to first-time users with a one-click link to the
+  setting and a brief explanation of `high` vs `max`.
+- Per-request `[req] reasoning_effort=<value> (variant=<id>)` log line in the
+  output channel, so users and developers can confirm at a glance which
+  effort each request is sending.
+
+### Changed
+
+- `MODEL_VARIANTS` no longer hardcodes `effort: "max"` on thinking variants;
+  the value comes from the new user setting at request time. Variant tooltips
+  drop the "at max effort" suffix to match.
+- `DeepSeekModelVariant` type drops the `effort?: "high" | "max"` field. This
+  is an internal type; no public API is affected.
+
 ## [0.3.1] - 2026-04-29
 
 ### Added

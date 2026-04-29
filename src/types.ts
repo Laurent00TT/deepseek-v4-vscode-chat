@@ -60,8 +60,12 @@ export interface ToolCallBuffer {
 /**
  * DeepSeek model variant published to the VS Code model picker.
  * `apiModel` is what we send in the OpenAI-compatible request body;
- * `thinking` controls whether to enable extended thinking mode;
- * `effort` is forwarded as `reasoning_effort` ("high" or "max") when thinking is on.
+ * `thinking` controls whether to enable extended thinking mode.
+ *
+ * `reasoning_effort` is no longer a per-variant constant — it is read at
+ * request time from the user setting `deepseekv4.reasoningEffort` (values
+ * `"high"` | `"max"`, default `"max"`). The setting only takes effect for
+ * variants where `thinking === true`.
  */
 export interface DeepSeekModelVariant {
 	id: string;
@@ -69,7 +73,6 @@ export interface DeepSeekModelVariant {
 	tooltip: string;
 	apiModel: "deepseek-v4-pro" | "deepseek-v4-flash";
 	thinking: boolean;
-	effort?: "high" | "max";
 	maxInputTokens: number;
 	maxOutputTokens: number;
 }

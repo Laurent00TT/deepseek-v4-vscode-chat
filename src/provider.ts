@@ -30,18 +30,20 @@ const BASE_URL = "https://api.deepseek.com/v1";
  */
 // DS V4's context window is 1M (input+output total). All four variants are
 // configured to use the maximum reasonable allocation under that ceiling.
-// Thinking variants use effort=max — Think Max requires ≥384K of reasoning
-// budget, so we give them 256K output (which subsumes the reasoning chain).
+// Thinking variants budget 256K output to comfortably subsume the reasoning
+// chain (Think Max needs ≥384K of reasoning budget when effort=max).
+//
+// `reasoning_effort` is read from the `deepseekv4.reasoningEffort` user
+// setting at request time, not stored on the variant.
 //
 // Listed strongest→cheapest; VS Code uses the first entry as the default.
 const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 	{
 		id: "deepseek-v4-pro::thinking",
 		displayName: "DeepSeek V4 Pro (thinking)",
-		tooltip: "DeepSeek V4 Pro — strongest, extended thinking at max effort",
+		tooltip: "DeepSeek V4 Pro — strongest, extended thinking",
 		apiModel: "deepseek-v4-pro",
 		thinking: true,
-		effort: "max",
 		maxInputTokens: 720896,   // 704K
 		maxOutputTokens: 262144,  // 256K (subsumes the 384K reasoning chain budget)
 	},
@@ -57,10 +59,9 @@ const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 	{
 		id: "deepseek-v4-flash::thinking",
 		displayName: "DeepSeek V4 Flash (thinking)",
-		tooltip: "DeepSeek V4 Flash — cheapest with extended thinking at max effort",
+		tooltip: "DeepSeek V4 Flash — cheapest with extended thinking",
 		apiModel: "deepseek-v4-flash",
 		thinking: true,
-		effort: "max",
 		maxInputTokens: 720896,   // 704K
 		maxOutputTokens: 262144,  // 256K
 	},
@@ -532,6 +533,16 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		}
 
 		md.appendMarkdown("---\n\n");
+
+		// Reasoning effort row: shows the current setting value plus a click-
+		// through to the specific setting. Helps discoverability — users who
+		// hover the status bar to check cost will also notice this control.
+		const currentEffort = vscode.workspace
+			.getConfiguration("deepseekv4")
+			.get<string>("reasoningEffort", "max");
+		md.appendMarkdown(
+			`**Reasoning effort** &nbsp; \`${currentEffort}\` &nbsp; [$(gear) configure](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)\n\n`,
+		);
 		md.appendMarkdown("[View full log](command:deepseekv4.showLog)");
 
 		return md;
@@ -947,9 +958,16 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             };
 
 			if (variant.thinking) {
-				if (variant.effort) {
-					(requestBody as Record<string, unknown>).reasoning_effort = variant.effort;
-				}
+				const raw = vscode.workspace
+					.getConfiguration("deepseekv4")
+					.get<string>("reasoningEffort", "max");
+				// Defensive: the package.json schema constrains the settings UI to
+				// "high" | "max", but a hand-edited settings.json could contain
+				// anything. Coerce unknown values to "max" rather than passing
+				// arbitrary strings to the API.
+				const effort: "high" | "max" = raw === "high" ? "high" : "max";
+				(requestBody as Record<string, unknown>).reasoning_effort = effort;
+				this.outputChannel.appendLine(`[req] reasoning_effort=${effort} (variant=${variant.id})`);
 				// Per DeepSeek docs: temperature/top_p/penalty params are ignored
 				// in thinking mode. We omit them to keep the request body honest.
 			} else {
