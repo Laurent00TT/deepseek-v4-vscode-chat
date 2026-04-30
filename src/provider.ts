@@ -15,6 +15,7 @@ import { convertTools, convertMessages, tryParseJSONObject, validateRequest } fr
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 
 const REASONING_CACHE_STATE_KEY = "deepseekv4.reasoningCache";
+const UI_STATE_KEY = "deepseekv4.uiState";
 
 const BASE_URL = "https://api.deepseek.com/v1";
 
@@ -206,6 +207,13 @@ interface BalanceInfo {
 	fetchedAt: number;
 }
 
+interface PersistedUiState {
+	balance?: BalanceInfo;
+	sessionCost?: number;
+	sessionCurrency?: PricingCurrency;
+	sessionRequestCount?: number;
+}
+
 const BALANCE_URL = "https://api.deepseek.com/user/balance";
 
 /** 24-hour HH:MM:SS, padded — independent of OS locale. */
@@ -226,6 +234,15 @@ function currencySymbol(currency: string): string {
 		case "JPY": return "¥";
 		default: return currency + " ";
 	}
+}
+
+
+function formatMoney(n: number): string {
+	const fixed = n.toFixed(2);
+	const [intPart, fracPart] = fixed.split(".");
+	const frac = fracPart.replace(/0+$/, "");
+	const int = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+	return frac.length > 0 ? `${int}.${frac}` : int;
 }
 
 function estimateCost(
@@ -429,6 +446,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			this.outputChannel.appendLine(`[ctor] restored ${this._reasoningCache.size()} reasoning cache entries`);
 		}
 
+		const uiState = this.globalState.get<PersistedUiState>(UI_STATE_KEY);
+		this.restoreUiState(uiState);
+
 		// Persist on every cache.set, debounced so a flurry of writes during
 		// one streaming turn collapses to a single disk hit.
 		this._reasoningCache.setOnChange(() => {
@@ -458,9 +478,60 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	private refreshStatusBar(): void {
-		this.statusBar.text = "$(sparkle) DS V4";
+		const balanceStr = this._balance
+			? ` ${currencySymbol(this._balance.currency)}${formatMoney(this._balance.totalBalance)}`
+			: "";
+		const costStr =
+			this._sessionCost > 0 ? ` | ${currencySymbol(this._sessionCurrency)}${formatMoney(this._sessionCost)}` : "";
+		this.statusBar.text = `$(sparkle) DS V4 |${balanceStr}${costStr}`;
 		this.statusBar.tooltip = this.buildTooltip();
 		this.statusBar.show();
+	}
+
+	private restoreUiState(state: PersistedUiState | undefined): void {
+		if (!state || typeof state !== "object") {
+			return;
+		}
+
+		if (state.balance && this.isValidBalanceInfo(state.balance)) {
+			this._balance = state.balance;
+		}
+		if (typeof state.sessionCost === "number" && Number.isFinite(state.sessionCost) && state.sessionCost >= 0) {
+			this._sessionCost = state.sessionCost;
+		}
+		if (state.sessionCurrency === "USD" || state.sessionCurrency === "CNY") {
+			this._sessionCurrency = state.sessionCurrency;
+		}
+		if (
+			typeof state.sessionRequestCount === "number" &&
+			Number.isInteger(state.sessionRequestCount) &&
+			state.sessionRequestCount >= 0
+		) {
+			this._sessionRequestCount = state.sessionRequestCount;
+		}
+
+		if (this._balance || this._sessionCost > 0 || this._sessionRequestCount > 0) {
+			this.outputChannel.appendLine("[ctor] restored cached UI state");
+		}
+	}
+
+	private isValidBalanceInfo(balance: BalanceInfo): boolean {
+		return (
+			typeof balance.currency === "string" &&
+			Number.isFinite(balance.totalBalance) &&
+			Number.isFinite(balance.grantedBalance) &&
+			Number.isFinite(balance.toppedUpBalance) &&
+			Number.isFinite(balance.fetchedAt)
+		);
+	}
+
+	private persistUiState(): void {
+		void this.globalState.update(UI_STATE_KEY, {
+			balance: this._balance,
+			sessionCost: this._sessionCost,
+			sessionCurrency: this._sessionCurrency,
+			sessionRequestCount: this._sessionRequestCount,
+		} satisfies PersistedUiState);
 	}
 
 	/**
@@ -492,7 +563,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		}
 		const sym = currencySymbol(this._balance.currency);
 		void vscode.window.setStatusBarMessage(
-			`$(check) DeepSeek balance: ${sym}${this._balance.totalBalance.toFixed(2)}`,
+			`$(check) DeepSeek balance: ${sym}${formatMoney(this._balance.totalBalance)}`,
 			4000,
 		);
 	}
@@ -526,9 +597,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// that explicitly instead of silently showing a misleading number.
 			const accountCcy = this._balance.currency.toUpperCase();
 			if (accountCcy !== "USD" && accountCcy !== "CNY") {
-				md.appendMarkdown(
+			md.appendMarkdown(
 					`_$(warning) Cost estimation uses USD pricing — actual billing is in ${accountCcy}_\n\n`,
-				);
+			);
 			}
 		}
 
@@ -556,6 +627,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	public clearSession(): void {
 		this._sessionCost = 0;
 		this._sessionRequestCount = 0;
+		this.persistUiState();
 		this.refreshStatusBar();
 		this.log("session.clear", {});
 	}
@@ -656,6 +728,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				topped_up: this._balance.toppedUpBalance,
 				session_currency: this._sessionCurrency,
 			});
+			this.persistUiState();
 			// Both silent and manual paths just swap the tooltip reference;
 			// the next hover renders fresh data. The manual path additionally
 			// flashes a transient ack message with the new balance so the
@@ -803,35 +876,35 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		const missingKeyTooltip = 'No API key configured. Run "Manage DeepSeek V4 Provider" from the Command Palette.';
 
 		return MODEL_VARIANTS.map((v) => ({
-			id: v.id,
-			name: v.displayName,
-			tooltip: hasKey ? v.tooltip : missingKeyTooltip,
-			// @non-public: `detail` is on the public typedef but Copilot Chat
-			// renders it directly under the model name in the picker.
-			detail: hasKey ? undefined : missingKeyTooltip,
-			family: "deepseek-v4",
-			version: "1.0.0",
-			maxInputTokens: v.maxInputTokens,
-			maxOutputTokens: v.maxOutputTokens,
-			capabilities: {
-				toolCalling: true,
-				imageInput: false,
-			},
-			// @non-public LanguageModelChatInformation fields used by Copilot
-			// Chat's model picker. Same shape used by Copilot's built-in
-			// OpenAI/Anthropic providers.
-			//   - `isUserSelectable`: controls picker visibility
-			//   - `statusIcon`: leading icon (we use `warning` when no key)
-			// FAILURE MODE: if Copilot Chat renames or removes these fields,
-			// the warning icon stops rendering — the picker still works
-			// because `id`, `name`, `family`, `version`, `maxInputTokens`,
-			// `maxOutputTokens`, `capabilities` are all public. We never
-			// REQUIRE these fields, only enhance the picker with them.
-			// Re-evaluate when `vscode.LanguageModelChatInformation` adds
-			// these to its public typedef.
-			isUserSelectable: true,
-			statusIcon: hasKey ? undefined : new vscode.ThemeIcon("warning"),
-		} as unknown as LanguageModelChatInformation));
+					id: v.id,
+					name: v.displayName,
+					tooltip: hasKey ? v.tooltip : missingKeyTooltip,
+					// @non-public: `detail` is on the public typedef but Copilot Chat
+					// renders it directly under the model name in the picker.
+					detail: hasKey ? undefined : missingKeyTooltip,
+					family: "deepseek-v4",
+					version: "1.0.0",
+					maxInputTokens: v.maxInputTokens,
+					maxOutputTokens: v.maxOutputTokens,
+					capabilities: {
+						toolCalling: true,
+						imageInput: false,
+					},
+					// @non-public LanguageModelChatInformation fields used by Copilot
+					// Chat's model picker. Same shape used by Copilot's built-in
+					// OpenAI/Anthropic providers.
+					//   - `isUserSelectable`: controls picker visibility
+					//   - `statusIcon`: leading icon (we use `warning` when no key)
+					// FAILURE MODE: if Copilot Chat renames or removes these fields,
+					// the warning icon stops rendering — the picker still works
+					// because `id`, `name`, `family`, `version`, `maxInputTokens`,
+					// `maxOutputTokens`, `capabilities` are all public. We never
+					// REQUIRE these fields, only enhance the picker with them.
+					// Re-evaluate when `vscode.LanguageModelChatInformation` adds
+					// these to its public typedef.
+					isUserSelectable: true,
+					statusIcon: hasKey ? undefined : new vscode.ThemeIcon("warning"),
+				} as unknown as LanguageModelChatInformation));
 	}
 
 	async provideLanguageModelChatInformation(
@@ -899,63 +972,63 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				throw new Error(`Unknown DeepSeek model variant: ${model.id}`);
 			}
 
-            const openaiMessages = convertMessages(messages);
-            this.log("request.history", {
-                modelId: model.id,
-                count: openaiMessages.length,
-                roles: openaiMessages.map((m) => {
-                    if (m.role === "assistant" && m.tool_calls?.length) {
-                        return `assistant[tc:${m.tool_calls.map((tc) => `${tc.function.name}#${tc.id}`).join(",")}]`;
-                    }
-                    if (m.role === "tool") {
-                        return `tool[id:${m.tool_call_id}]`;
-                    }
-                    return m.role;
-                }),
-            });
-            this.attachReasoningToHistory(openaiMessages);
+			const openaiMessages = convertMessages(messages);
+			this.log("request.history", {
+				modelId: model.id,
+				count: openaiMessages.length,
+				roles: openaiMessages.map((m) => {
+					if (m.role === "assistant" && m.tool_calls?.length) {
+						return `assistant[tc:${m.tool_calls.map((tc) => `${tc.function.name}#${tc.id}`).join(",")}]`;
+					}
+					if (m.role === "tool") {
+						return `tool[id:${m.tool_call_id}]`;
+					}
+					return m.role;
+				}),
+			});
+			this.attachReasoningToHistory(openaiMessages);
 
 			validateRequest(messages);
 
-            const toolConfig = convertTools(options);
+			const toolConfig = convertTools(options);
 
-        if (options.tools && options.tools.length > 128) {
-            throw new Error("Cannot have more than 128 tools per request.");
-        }
+			if (options.tools && options.tools.length > 128) {
+				throw new Error("Cannot have more than 128 tools per request.");
+			}
 
-            const messageChars = this.countMessageChars(messages);
-            const toolChars = this.countToolChars(toolConfig.tools);
-            // Per-request char count lives in a LOCAL — if it were on the
-            // instance, two concurrent provideLanguageModelChatResponse calls
-            // could overwrite each other between the fetch and the usage
-            // callback, polluting the EMA estimator with the wrong request's
-            // size.
-            const requestInputChars = messageChars + toolChars;
-            const inputTokenCount = Math.ceil(messageChars / this._charsPerToken);
-            const toolTokenCount = Math.ceil(toolChars / this._charsPerToken);
-            const tokenLimit = Math.max(1, model.maxInputTokens);
-            if (inputTokenCount + toolTokenCount > tokenLimit) {
-                console.error("[DeepSeek V4] Message exceeds token limit", { total: inputTokenCount + toolTokenCount, tokenLimit });
-                throw new Error("Message exceeds token limit.");
-            }
+			const messageChars = this.countMessageChars(messages);
+			const toolChars = this.countToolChars(toolConfig.tools);
+			// Per-request char count lives in a LOCAL — if it were on the
+			// instance, two concurrent provideLanguageModelChatResponse calls
+			// could overwrite each other between the fetch and the usage
+			// callback, polluting the EMA estimator with the wrong request's
+			// size.
+			const requestInputChars = messageChars + toolChars;
+			const inputTokenCount = Math.ceil(messageChars / this._charsPerToken);
+			const toolTokenCount = Math.ceil(toolChars / this._charsPerToken);
+			const tokenLimit = Math.max(1, model.maxInputTokens);
+			if (inputTokenCount + toolTokenCount > tokenLimit) {
+				console.error("[DeepSeek V4] Message exceeds token limit", { total: inputTokenCount + toolTokenCount, tokenLimit });
+				throw new Error("Message exceeds token limit.");
+			}
 
-            // When the host supplies a max_tokens hint we honour it (capped to
-            // the variant's ceiling). When it doesn't, we hand the model the
-            // full configured budget — important for thinking-max so the
-            // reasoning chain isn't silently truncated.
-            const requestedMaxTokens = options.modelOptions?.max_tokens;
-            const maxTokens = typeof requestedMaxTokens === "number" && requestedMaxTokens > 0
-                ? Math.min(requestedMaxTokens, model.maxOutputTokens)
-                : model.maxOutputTokens;
+			// When the host supplies a max_tokens hint we honour it (capped to
+			// the variant's ceiling). When it doesn't, we hand the model the
+			// full configured budget — important for thinking-max so the
+			// reasoning chain isn't silently truncated.
+			const requestedMaxTokens = options.modelOptions?.max_tokens;
+			const maxTokens = typeof requestedMaxTokens === "number" && requestedMaxTokens > 0
+					? Math.min(requestedMaxTokens, model.maxOutputTokens)
+					: model.maxOutputTokens;
 
-            requestBody = {
-                model: variant.apiModel,
-                messages: openaiMessages,
-                stream: true,
-                stream_options: { include_usage: true },
-                max_tokens: maxTokens,
-                thinking: { type: variant.thinking ? "enabled" : "disabled" },
-            };
+			requestBody = {
+				model: variant.apiModel,
+				messages: openaiMessages,
+				stream: true,
+				stream_options: { include_usage: true },
+				max_tokens: maxTokens,
+				thinking: { type: variant.thinking ? "enabled" : "disabled" },
+			};
 
 			if (variant.thinking) {
 				const raw = vscode.workspace
@@ -1011,7 +1084,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 						signal: abort.signal,
 					},
 					abort.signal,
-					(msg, data) => this.log(msg, data),
+						(msg, data) => this.log(msg, data),
 				);
 			} finally {
 				cancelSub.dispose();
@@ -1054,6 +1127,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					session_total: this._sessionCost.toFixed(4),
 					session_reqs: this._sessionRequestCount,
 				});
+				this.persistUiState();
 				this.refreshStatusBar();
 				// Background-refresh balance after each chat (debounced).
 				// No-op if the user hasn't fetched balance manually yet.
@@ -1120,62 +1194,62 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * @param progress Progress reporter for streamed parts.
 	 * @param token Cancellation token.
 	 */
-	    private async processStreamingResponse(
-	        ctx: StreamContext,
-	        responseBody: ReadableStream<Uint8Array>,
-	        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-	        token: vscode.CancellationToken,
-	    ): Promise<DSUsage | undefined> {
-        const reader = responseBody.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let lastUsage: DSUsage | undefined;
+	private async processStreamingResponse(
+		ctx: StreamContext,
+		responseBody: ReadableStream<Uint8Array>,
+		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+		token: vscode.CancellationToken,
+	): Promise<DSUsage | undefined> {
+		const reader = responseBody.getReader();
+		const decoder = new TextDecoder();
+		let buffer = "";
+		let lastUsage: DSUsage | undefined;
 
-			try {
-				while (!token.isCancellationRequested) {
-					const { done, value } = await reader.read();
-                if (done) { break; }
+		try {
+			while (!token.isCancellationRequested) {
+				const { done, value } = await reader.read();
+				if (done) { break; }
 
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split("\n");
-					buffer = lines.pop() || "";
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
 
-					for (const line of lines) {
-						if (!line.startsWith("data: ")) {
-							continue;
+				for (const line of lines) {
+					if (!line.startsWith("data: ")) {
+						continue;
+					}
+					const data = line.slice(6);
+					if (data === "[DONE]") {
+						// Do not throw on [DONE]; any incomplete/empty buffers are ignored.
+						await this.flushToolCallBuffers(ctx, progress, /*throwOnInvalid*/ false);
+						// Defensive cache write: if no finish_reason was seen but reasoning
+						// was streamed, still persist it. Idempotent — same fingerprint
+						// just overwrites.
+						this.persistReasoningForTurn(ctx);
+						continue;
+					}
+
+					try {
+						const parsed = JSON.parse(data) as Record<string, unknown>;
+						// DS sends a final chunk with `usage` populated when
+						// stream_options.include_usage=true. Capture it before
+						// dispatching so we have token counts for cost reporting.
+						if (parsed.usage && typeof parsed.usage === "object") {
+							lastUsage = parsed.usage as DSUsage;
 						}
-						const data = line.slice(6);
-                    if (data === "[DONE]") {
-                        // Do not throw on [DONE]; any incomplete/empty buffers are ignored.
-                        await this.flushToolCallBuffers(ctx, progress, /*throwOnInvalid*/ false);
-                        // Defensive cache write: if no finish_reason was seen but reasoning
-                        // was streamed, still persist it. Idempotent — same fingerprint
-                        // just overwrites.
-                        this.persistReasoningForTurn(ctx);
-                        continue;
-                    }
-
-						try {
-							const parsed = JSON.parse(data) as Record<string, unknown>;
-                        // DS sends a final chunk with `usage` populated when
-                        // stream_options.include_usage=true. Capture it before
-                        // dispatching so we have token counts for cost reporting.
-                        if (parsed.usage && typeof parsed.usage === "object") {
-                            lastUsage = parsed.usage as DSUsage;
-                        }
-                        await this.processDelta(ctx, parsed, progress);
-                    } catch {
-                        // Silently ignore malformed SSE lines temporarily
-                    }
-                }
-            }
-        } finally {
-            reader.releaseLock();
-            // ctx is per-call, so no leftover state needs to be cleared here —
-            // it just goes out of scope when the request finishes.
-        }
-        return lastUsage;
-    }
+						await this.processDelta(ctx, parsed, progress);
+					} catch {
+						// Silently ignore malformed SSE lines temporarily
+					}
+				}
+			}
+		} finally {
+			reader.releaseLock();
+			// ctx is per-call, so no leftover state needs to be cleared here —
+			// it just goes out of scope when the request finishes.
+		}
+		return lastUsage;
+	}
 
 	/**
 	 * Handle a single streamed delta chunk, emitting text and tool call parts.
@@ -1183,14 +1257,14 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * @param delta Parsed SSE chunk from the Router.
 	 * @param progress Progress reporter for parts.
 	 */
-    private async processDelta(
-        ctx: StreamContext,
-        delta: Record<string, unknown>,
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-    ): Promise<boolean> {
-        let emitted = false;
-        const choice = (delta.choices as Record<string, unknown>[] | undefined)?.[0];
-        if (!choice) { return false; }
+	private async processDelta(
+		ctx: StreamContext,
+		delta: Record<string, unknown>,
+		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+	): Promise<boolean> {
+		let emitted = false;
+		const choice = (delta.choices as Record<string, unknown>[] | undefined)?.[0];
+		if (!choice) { return false; }
 
 		const deltaObj = choice.delta as Record<string, unknown> | undefined;
 
@@ -1227,208 +1301,208 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			}
 		}
 
-            if (deltaObj?.content) {
-                const content = String(deltaObj.content);
-                if (content.length > 0) {
-                    progress.report(new vscode.LanguageModelTextPart(content));
-                    emitted = true;
-                }
-            }
+		if (deltaObj?.content) {
+			const content = String(deltaObj.content);
+			if (content.length > 0) {
+				progress.report(new vscode.LanguageModelTextPart(content));
+				emitted = true;
+			}
+		}
 
-			if (deltaObj?.tool_calls) {
-                const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
+		if (deltaObj?.tool_calls) {
+			const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
 
-				for (const tc of toolCalls) {
-					const idx = (tc.index as number) ?? 0;
-					// Ignore any further deltas for an index we've already completed
-					if (ctx.completedToolCallIndices.has(idx)) {
-						continue;
+			for (const tc of toolCalls) {
+				const idx = (tc.index as number) ?? 0;
+				// Ignore any further deltas for an index we've already completed
+				if (ctx.completedToolCallIndices.has(idx)) {
+					continue;
+				}
+				const buf = ctx.toolCallBuffers.get(idx) ?? { args: "" };
+				if (tc.id && typeof tc.id === "string") {
+					buf.id = tc.id as string;
+				}
+				const func = tc.function as Record<string, unknown> | undefined;
+				if (func?.name && typeof func.name === "string") {
+					buf.name = func.name as string;
+				}
+				if (typeof func?.arguments === "string") {
+					buf.args += func.arguments as string;
+				}
+				ctx.toolCallBuffers.set(idx, buf);
+
+				// Emit immediately once arguments become valid JSON to avoid perceived hanging
+				await this.tryEmitBufferedToolCall(ctx, idx, progress);
+			}
+		}
+
+		const finish = (choice.finish_reason as string | undefined) ?? undefined;
+		if (finish !== undefined) {
+			// DeepSeek can return special finish_reasons INSIDE an HTTP 200
+			// response (i.e. mid-stream truncation). The official docs list:
+			//   stop | length | content_filter | tool_calls | insufficient_system_resource
+			// We surface non-clean ones so the user knows the turn was cut
+			// off, and so we don't accidentally throw on partial tool-call
+			// JSON that the model never finished emitting.
+			if (finish === "insufficient_system_resource") {
+				this.log("api.midstream_truncate", {
+					finish,
+					reasoningLen: ctx.reasoning.length,
+					contentLen: ctx.emittedText.length,
+				});
+				// Severity: this is a true mid-stream failure, not a hint —
+				// upgrade to ErrorMessage. We do NOT bind a "Retry" button
+				// to a chat-host command (e.g. workbench.action.chat.send)
+				// because Copilot Chat's submit/resend flow is panel-internal
+				// and not exposed as a stable, panel-agnostic command. The
+				// user resends from the chat input themselves; we just give
+				// them a path to inspect what was truncated.
+				void (async () => {
+					const choice = await vscode.window.showErrorMessage(
+						"DeepSeek backend ran out of capacity mid-stream. The response is incomplete — please send your message again.",
+						"Show Log",
+					);
+					if (choice === "Show Log") {
+						void vscode.commands.executeCommand("deepseekv4.showLog");
 					}
-					const buf = ctx.toolCallBuffers.get(idx) ?? { args: "" };
-					if (tc.id && typeof tc.id === "string") {
-						buf.id = tc.id as string;
-					}
-					const func = tc.function as Record<string, unknown> | undefined;
-					if (func?.name && typeof func.name === "string") {
-						buf.name = func.name as string;
-					}
-					if (typeof func?.arguments === "string") {
-						buf.args += func.arguments as string;
-					}
-					ctx.toolCallBuffers.set(idx, buf);
+				})();
+			} else if (finish === "length") {
+				this.log("api.length_truncate", { finish });
+			} else if (finish === "content_filter") {
+				this.log("api.content_filter", { finish });
+			}
 
-					// Emit immediately once arguments become valid JSON to avoid perceived hanging
-                    await this.tryEmitBufferedToolCall(ctx, idx, progress);
-                }
-            }
+			// Only require valid JSON args when the stream finished cleanly.
+			// On truncation, partial tool-call JSON is expected; we flush
+			// best-effort and drop unparseable buffers without throwing.
+			const isClean = finish === "tool_calls" || finish === "stop";
+			await this.flushToolCallBuffers(ctx, progress, /*throwOnInvalid=*/ isClean);
+			this.persistReasoningForTurn(ctx);
+		}
+		return emitted;
+	}
 
-        const finish = (choice.finish_reason as string | undefined) ?? undefined;
-        if (finish !== undefined) {
-            // DeepSeek can return special finish_reasons INSIDE an HTTP 200
-            // response (i.e. mid-stream truncation). The official docs list:
-            //   stop | length | content_filter | tool_calls | insufficient_system_resource
-            // We surface non-clean ones so the user knows the turn was cut
-            // off, and so we don't accidentally throw on partial tool-call
-            // JSON that the model never finished emitting.
-            if (finish === "insufficient_system_resource") {
-                this.log("api.midstream_truncate", {
-                    finish,
-                    reasoningLen: ctx.reasoning.length,
-                    contentLen: ctx.emittedText.length,
-                });
-                // Severity: this is a true mid-stream failure, not a hint —
-                // upgrade to ErrorMessage. We do NOT bind a "Retry" button
-                // to a chat-host command (e.g. workbench.action.chat.send)
-                // because Copilot Chat's submit/resend flow is panel-internal
-                // and not exposed as a stable, panel-agnostic command. The
-                // user resends from the chat input themselves; we just give
-                // them a path to inspect what was truncated.
-                void (async () => {
-                    const choice = await vscode.window.showErrorMessage(
-                        "DeepSeek backend ran out of capacity mid-stream. The response is incomplete — please send your message again.",
-                        "Show Log",
-                    );
-                    if (choice === "Show Log") {
-                        void vscode.commands.executeCommand("deepseekv4.showLog");
-                    }
-                })();
-            } else if (finish === "length") {
-                this.log("api.length_truncate", { finish });
-            } else if (finish === "content_filter") {
-                this.log("api.content_filter", { finish });
-            }
+	/**
+	 * Stash this turn's accumulated reasoning into the LRU cache. We always
+	 * write — even when this turn has no tool calls — because integration
+	 * tests confirm that when `tools` are advertised in a thinking-mode
+	 * request, DeepSeek demands EVERY prior assistant turn carry
+	 * reasoning_content, not just turns that themselves invoked a tool.
+	 * (When no tools are advertised, no-tc turns don't need it — but
+	 * caching them anyway is harmless and simplifies the logic.)
+	 *
+	 * Fingerprint anchors:
+	 *   - tool_calls present → name:id (most stable)
+	 *   - otherwise          → emitted visible text (whitespace-normalized)
+	 */
+	private persistReasoningForTurn(ctx: StreamContext): void {
+		if (!ctx.reasoning) {
+			return;
+		}
+		// Close out the live thinking stream with a newline so subsequent
+		// structured log lines render cleanly.
+		this.outputChannel.appendLine("");
+		this.outputChannel.appendLine(`[${new Date().toISOString().slice(11, 23)}] thinking.end ▲ (${ctx.reasoning.length} chars)`);
+		const fp = fingerprintAssistantTurn({
+			text: ctx.emittedText,
+			toolCalls: ctx.emittedToolCalls,
+		});
+		if (!fp) {
+			// No anchor (no text emitted AND no tool calls). Can't key this
+			// turn into the cache; drop the reasoning silently.
+			this.log("cache.skip", { reason: "no-anchor", reasoningLen: ctx.reasoning.length });
+			ctx.reasoning = "";
+			return;
+		}
+		this.log("cache.set", {
+			fp,
+			mode: fp.startsWith("tc:") ? "tool_calls" : "text",
+			toolCalls: ctx.emittedToolCalls,
+			textLen: ctx.emittedText.length,
+			textHead: ctx.emittedText.slice(0, 80),
+			reasoningLen: ctx.reasoning.length,
+		});
 
-            // Only require valid JSON args when the stream finished cleanly.
-            // On truncation, partial tool-call JSON is expected; we flush
-            // best-effort and drop unparseable buffers without throwing.
-            const isClean = finish === "tool_calls" || finish === "stop";
-            await this.flushToolCallBuffers(ctx, progress, /*throwOnInvalid=*/ isClean);
-            this.persistReasoningForTurn(ctx);
-        }
-        return emitted;
-    }
+		const byteLen = Buffer.byteLength(ctx.reasoning, "utf8");
+		if (byteLen > ReasoningCache.ENTRY_SIZE_WARN_BYTES) {
+			this.log("cache.warn.large_entry", {
+				fp,
+				byteLen,
+				warnLimit: ReasoningCache.ENTRY_SIZE_WARN_BYTES,
+				hint: "reasoning chain exceeds recommended size; may cause memory pressure",
+			});
+		}
 
-    /**
-     * Stash this turn's accumulated reasoning into the LRU cache. We always
-     * write — even when this turn has no tool calls — because integration
-     * tests confirm that when `tools` are advertised in a thinking-mode
-     * request, DeepSeek demands EVERY prior assistant turn carry
-     * reasoning_content, not just turns that themselves invoked a tool.
-     * (When no tools are advertised, no-tc turns don't need it — but
-     * caching them anyway is harmless and simplifies the logic.)
-     *
-     * Fingerprint anchors:
-     *   - tool_calls present → name:id (most stable)
-     *   - otherwise          → emitted visible text (whitespace-normalized)
-     */
-    private persistReasoningForTurn(ctx: StreamContext): void {
-        if (!ctx.reasoning) {
-            return;
-        }
-        // Close out the live thinking stream with a newline so subsequent
-        // structured log lines render cleanly.
-        this.outputChannel.appendLine("");
-        this.outputChannel.appendLine(`[${new Date().toISOString().slice(11, 23)}] thinking.end ▲ (${ctx.reasoning.length} chars)`);
-        const fp = fingerprintAssistantTurn({
-            text: ctx.emittedText,
-            toolCalls: ctx.emittedToolCalls,
-        });
-        if (!fp) {
-            // No anchor (no text emitted AND no tool calls). Can't key this
-            // turn into the cache; drop the reasoning silently.
-            this.log("cache.skip", { reason: "no-anchor", reasoningLen: ctx.reasoning.length });
-            ctx.reasoning = "";
-            return;
-        }
-        this.log("cache.set", {
-            fp,
-            mode: fp.startsWith("tc:") ? "tool_calls" : "text",
-            toolCalls: ctx.emittedToolCalls,
-            textLen: ctx.emittedText.length,
-            textHead: ctx.emittedText.slice(0, 80),
-            reasoningLen: ctx.reasoning.length,
-        });
+		this._reasoningCache.set(fp, ctx.reasoning);
 
-        const byteLen = Buffer.byteLength(ctx.reasoning, "utf8");
-        if (byteLen > ReasoningCache.ENTRY_SIZE_WARN_BYTES) {
-            this.log("cache.warn.large_entry", {
-                fp,
-                byteLen,
-                warnLimit: ReasoningCache.ENTRY_SIZE_WARN_BYTES,
-                hint: "reasoning chain exceeds recommended size; may cause memory pressure",
-            });
-        }
+		// After writing, check if the total cache size is approaching the
+		// globalState persistence limit. Log a warning so users can monitor
+		// via the cache stats command. No eviction here — that's handled
+		// inside ReasoningCache.set() by the oldest-first LRU + byte cap.
+		const stats = this._reasoningCache.stats();
+		if (stats.totalBytes > ReasoningCache.TOTAL_BYTES_WARN) {
+			this.log("cache.warn.total_size", {
+				totalBytes: stats.totalBytes,
+				warnLimit: ReasoningCache.TOTAL_BYTES_WARN,
+				maxLimit: ReasoningCache.MAX_TOTAL_BYTES,
+				entryCount: stats.entryCount,
+				hint: "cache approaching VS Code globalState limits; old entries will be evicted automatically",
+			});
+		}
 
-        this._reasoningCache.set(fp, ctx.reasoning);
+		// Reset so a second [DONE]/finish_reason in the same turn doesn't double-write.
+		ctx.reasoning = "";
+	}
 
-        // After writing, check if the total cache size is approaching the
-        // globalState persistence limit. Log a warning so users can monitor
-        // via the cache stats command. No eviction here — that's handled
-        // inside ReasoningCache.set() by the oldest-first LRU + byte cap.
-        const stats = this._reasoningCache.stats();
-        if (stats.totalBytes > ReasoningCache.TOTAL_BYTES_WARN) {
-            this.log("cache.warn.total_size", {
-                totalBytes: stats.totalBytes,
-                warnLimit: ReasoningCache.TOTAL_BYTES_WARN,
-                maxLimit: ReasoningCache.MAX_TOTAL_BYTES,
-                entryCount: stats.entryCount,
-                hint: "cache approaching VS Code globalState limits; old entries will be evicted automatically",
-            });
-        }
-
-        // Reset so a second [DONE]/finish_reason in the same turn doesn't double-write.
-        ctx.reasoning = "";
-    }
-
-    /**
-     * Walk the converted history and re-attach `reasoning_content` to every
-     * prior assistant turn (with or without tool_calls). Integration tests
-     * confirm: DeepSeek's actual rule for thinking-mode requests is:
-     *   - `tools` not advertised → only tc-assistant turns NEED reasoning
-     *   - `tools` advertised     → ALL prior assistant turns NEED reasoning
-     * Mutates messages in place. Cache misses are logged but the request
-     * still goes through — DS will 400 in that case.
-     */
-    private attachReasoningToHistory(messages: OpenAIChatMessage[]): void {
-        let hits = 0;
-        let misses = 0;
-        for (const msg of messages) {
-            if (msg.role !== "assistant") {
-                continue;
-            }
-            if (msg.reasoning_content) {
-                continue;
-            }
-            const fp = fingerprintAssistantTurn({
-                text: msg.content ?? "",
-                toolCalls: (msg.tool_calls ?? []).map((tc) => ({
-                    id: tc.id,
-                    name: tc.function.name,
-                })),
-            });
-            if (!fp) {
-                continue;
-            }
-            const reasoning = this._reasoningCache.get(fp);
-            if (reasoning) {
-                msg.reasoning_content = reasoning;
-                hits++;
-            } else {
-                misses++;
-                const tcSummary = (msg.tool_calls ?? []).map((tc) => `${tc.function.name}:${tc.id}`);
-                this.log("cache.MISS", {
-                    fp,
-                    mode: fp.slice(0, 2),
-                    toolCalls: tcSummary,
-                    contentLen: msg.content?.length ?? 0,
-                    cacheKeys: this._reasoningCache.keys(),
-                });
-            }
-        }
-        if (hits + misses > 0) {
-            this.log("cache.attach", { hits, misses, total: hits + misses });
-        }
-    }
+	/**
+	 * Walk the converted history and re-attach `reasoning_content` to every
+	 * prior assistant turn (with or without tool_calls). Integration tests
+	 * confirm: DeepSeek's actual rule for thinking-mode requests is:
+	 *   - `tools` not advertised → only tc-assistant turns NEED reasoning
+	 *   - `tools` advertised     → ALL prior assistant turns NEED reasoning
+	 * Mutates messages in place. Cache misses are logged but the request
+	 * still goes through — DS will 400 in that case.
+	 */
+	private attachReasoningToHistory(messages: OpenAIChatMessage[]): void {
+		let hits = 0;
+		let misses = 0;
+		for (const msg of messages) {
+			if (msg.role !== "assistant") {
+				continue;
+			}
+			if (msg.reasoning_content) {
+				continue;
+			}
+			const fp = fingerprintAssistantTurn({
+				text: msg.content ?? "",
+				toolCalls: (msg.tool_calls ?? []).map((tc) => ({
+					id: tc.id,
+					name: tc.function.name,
+				})),
+			});
+			if (!fp) {
+				continue;
+			}
+			const reasoning = this._reasoningCache.get(fp);
+			if (reasoning) {
+				msg.reasoning_content = reasoning;
+				hits++;
+			} else {
+				misses++;
+				const tcSummary = (msg.tool_calls ?? []).map((tc) => `${tc.function.name}:${tc.id}`);
+				this.log("cache.MISS", {
+					fp,
+					mode: fp.slice(0, 2),
+					toolCalls: tcSummary,
+					contentLen: msg.content?.length ?? 0,
+					cacheKeys: this._reasoningCache.keys(),
+				});
+			}
+		}
+		if (hits + misses > 0) {
+			this.log("cache.attach", { hits, misses, total: hits + misses });
+		}
+	}
 
 	/**
 	 * Try to emit a buffered tool call when a valid name and JSON arguments are available.
@@ -1436,27 +1510,27 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * @param index The tool call index from the stream.
 	 * @param progress Progress reporter for parts.
 	 */
-    private async tryEmitBufferedToolCall(
-        ctx: StreamContext,
-        index: number,
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>
-    ): Promise<void> {
-        const buf = ctx.toolCallBuffers.get(index);
-        if (!buf) {
-            return;
-        }
-        if (!buf.name) {
-            return;
-        }
-        const canParse = tryParseJSONObject(buf.args);
-        if (!canParse.ok) {
-            return;
-        }
-        const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
-        progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, canParse.value));
-        ctx.toolCallBuffers.delete(index);
-        ctx.completedToolCallIndices.add(index);
-    }
+	private async tryEmitBufferedToolCall(
+		ctx: StreamContext,
+		index: number,
+		progress: vscode.Progress<vscode.LanguageModelResponsePart>
+	): Promise<void> {
+		const buf = ctx.toolCallBuffers.get(index);
+		if (!buf) {
+			return;
+		}
+		if (!buf.name) {
+			return;
+		}
+		const canParse = tryParseJSONObject(buf.args);
+		if (!canParse.ok) {
+			return;
+		}
+		const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
+		progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, canParse.value));
+		ctx.toolCallBuffers.delete(index);
+		ctx.completedToolCallIndices.add(index);
+	}
 
 	/**
 	 * Flush all buffered tool calls, optionally throwing if arguments are not valid JSON.
@@ -1464,29 +1538,29 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * @param progress Progress reporter for parts.
 	 * @param throwOnInvalid If true, throw when a tool call has invalid JSON args.
 	 */
-    private async flushToolCallBuffers(
-        ctx: StreamContext,
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-        throwOnInvalid: boolean,
-    ): Promise<void> {
-        if (ctx.toolCallBuffers.size === 0) {
-            return;
-        }
-        for (const [idx, buf] of Array.from(ctx.toolCallBuffers.entries())) {
-            const parsed = tryParseJSONObject(buf.args);
-            if (!parsed.ok) {
-                if (throwOnInvalid) {
-                    console.error("[DeepSeek V4] Invalid JSON for tool call", { idx, snippet: (buf.args || "").slice(0, 200) });
-                    throw new Error("Invalid JSON for tool call");
-                }
-                // When not throwing (e.g. on [DONE]), drop silently to reduce noise
-                continue;
-            }
-            const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
-            const name = buf.name ?? "unknown_tool";
-            progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
-            ctx.toolCallBuffers.delete(idx);
-            ctx.completedToolCallIndices.add(idx);
-        }
-    }
+	private async flushToolCallBuffers(
+		ctx: StreamContext,
+		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+		throwOnInvalid: boolean,
+	): Promise<void> {
+		if (ctx.toolCallBuffers.size === 0) {
+			return;
+		}
+		for (const [idx, buf] of Array.from(ctx.toolCallBuffers.entries())) {
+			const parsed = tryParseJSONObject(buf.args);
+			if (!parsed.ok) {
+				if (throwOnInvalid) {
+					console.error("[DeepSeek V4] Invalid JSON for tool call", { idx, snippet: (buf.args || "").slice(0, 200) });
+					throw new Error("Invalid JSON for tool call");
+				}
+				// When not throwing (e.g. on [DONE]), drop silently to reduce noise
+				continue;
+			}
+			const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
+			const name = buf.name ?? "unknown_tool";
+			progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
+			ctx.toolCallBuffers.delete(idx);
+			ctx.completedToolCallIndices.add(idx);
+		}
+	}
 }
