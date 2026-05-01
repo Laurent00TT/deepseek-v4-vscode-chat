@@ -1386,8 +1386,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
      * confirm: DeepSeek's actual rule for thinking-mode requests is:
      *   - `tools` not advertised → only tc-assistant turns NEED reasoning
      *   - `tools` advertised     → ALL prior assistant turns NEED reasoning
-     * Mutates messages in place. Cache misses are logged but the request
-     * still goes through — DS will 400 in that case.
+     * Mutates messages in place.
+     * On cache miss, sets reasoning_content="" as fallback to prevent a
+     * guaranteed 400 from the API. The conversation may be slightly degraded
+     * (the model loses one turn's reasoning context) but can continue.
      */
     private attachReasoningToHistory(messages: OpenAIChatMessage[]): void {
         let hits = 0;
@@ -1415,6 +1417,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                 hits++;
             } else {
                 misses++;
+                // Fallback: set empty reasoning_content so the API doesn't 400.
+                // This covers turns where reasoning was never cached (empty
+                // CoT, evicted, or from a pre-cache session). The model loses
+                // this turn's reasoning context but the conversation survives.
+                msg.reasoning_content = "";
                 const tcSummary = (msg.tool_calls ?? []).map((tc) => `${tc.function.name}:${tc.id}`);
                 this.log("cache.MISS", {
                     fp,
