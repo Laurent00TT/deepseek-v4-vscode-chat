@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [released]
 
+## [0.3.3] - 2026-05-01
+
+### Fixed
+
+- Thinking mode 400 error when `ReasoningCache` missed a prior turn's
+  reasoning chain. The extension now sets `reasoning_content=""` as a
+  fallback on cache MISS instead of omitting the field entirely, preventing
+  a conversation-deadlocking 400 from the DeepSeek API (#7).
+
 ## [0.3.2] - 2026-04-29
 
 ### Added
