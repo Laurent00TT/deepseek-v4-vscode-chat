@@ -458,7 +458,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	private refreshStatusBar(): void {
-		this.statusBar.text = "$(sparkle) DS V4";
+		const balanceStr = this._balance
+			? ` ${currencySymbol(this._balance.currency)}${this._balance.totalBalance.toFixed(2)}`
+			: "";
+		this.statusBar.text = `$(sparkle) DS V4${balanceStr}`;
 		this.statusBar.tooltip = this.buildTooltip();
 		this.statusBar.show();
 	}
