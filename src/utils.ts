@@ -142,11 +142,21 @@ function sanitizeSchema(input: unknown, propName?: string): Record<string, unkno
  */
 export function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): OpenAIChatMessage[] {
 	const out: OpenAIChatMessage[] = [];
+
+	// Try to resolve LanguageModelThinkingPart constructor — may not exist in
+	// older VS Code builds. When available, we can extract reasoning_content
+	// directly from the host message history instead of relying solely on
+	// the ReasoningCache.
+	const ThinkingPartCtor = (vscode as unknown as Record<string, unknown>)["LanguageModelThinkingPart"] as
+		| (new (...args: unknown[]) => unknown)
+		| undefined;
+
 	for (const m of messages) {
 		const role = mapRole(m);
 		const textParts: string[] = [];
 		const toolCalls: OpenAIToolCall[] = [];
 		const toolResults: { callId: string; content: string }[] = [];
+		let reasoningContent: string | undefined;
 
 		for (const part of m.content ?? []) {
 			if (part instanceof vscode.LanguageModelTextPart) {
@@ -164,12 +174,29 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
 				const callId = (part as { callId?: string }).callId ?? "";
 				const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
 				toolResults.push({ callId, content });
+			} else if (ThinkingPartCtor && part instanceof ThinkingPartCtor) {
+				// VS Code passes thinking content back in chat history.
+				// Accumulate it so we can round-trip it as reasoning_content
+				// on the assistant message. This is the most reliable source
+				// because it doesn't depend on fingerprint matching.
+				const val = (part as { value?: unknown }).value;
+				if (typeof val === "string" && val.length > 0) {
+					if (!reasoningContent) {
+						reasoningContent = "";
+					}
+					reasoningContent += val;
+				}
 			}
 		}
 
 		let emittedAssistantToolCall = false;
 		if (toolCalls.length > 0) {
-			out.push({ role: "assistant", content: textParts.join("") || undefined, tool_calls: toolCalls });
+			out.push({
+				role: "assistant",
+				content: textParts.join("") || undefined,
+				tool_calls: toolCalls,
+				reasoning_content: reasoningContent,
+			});
 			emittedAssistantToolCall = true;
 		}
 
@@ -179,7 +206,11 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
 
 		const text = textParts.join("");
 		if (text && (role === "system" || role === "user" || (role === "assistant" && !emittedAssistantToolCall))) {
-			out.push({ role, content: text });
+			out.push({ role, content: text, reasoning_content: reasoningContent });
+		} else if (!text && !emittedAssistantToolCall && reasoningContent && role === "assistant") {
+			// Reasoning-only assistant turn: no visible text and no tool calls,
+			// but we have thinking content that must be round-tripped.
+			out.push({ role: "assistant", reasoning_content: reasoningContent });
 		}
 	}
 	return out;

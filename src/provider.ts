@@ -1415,6 +1415,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                 hits++;
             } else {
                 misses++;
+                msg.reasoning_content = "";  // fallback: prevent guaranteed 400 when cache misses
                 const tcSummary = (msg.tool_calls ?? []).map((tc) => `${tc.function.name}:${tc.id}`);
                 this.log("cache.MISS", {
                     fp,
