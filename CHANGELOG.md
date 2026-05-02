@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [released]
 
+## [0.3.4] - 2026-05-01
+
+### Added
+
+- Account balance is now rendered inline in the status bar text
+  (e.g. `$(sparkle) DS V4  ¥13.33`) so users can monitor it without
+  hovering over the indicator. Closes #5.
+- A silent background balance fetch runs once on extension activation,
+  so the balance appears automatically a couple seconds after a VS Code
+  reload — no manual hover-refresh needed first. Failures are swallowed
+  (no-op when the API key isn't yet configured).
+
+### Changed
+
+- The hover tooltip is unchanged. It remains the source of truth for the
+  `fetchedAt` timestamp, the granted vs topped-up split, currency-mismatch
+  warnings, and session spend / request count.
+
+## [0.3.3] - 2026-05-01
+
+### Fixed
+
+- Thinking mode 400 error when `ReasoningCache` missed a prior turn's
+  reasoning chain. The extension now sets `reasoning_content=""` as a
+  fallback on cache MISS instead of omitting the field entirely, preventing
+  a conversation-deadlocking 400 from the DeepSeek API (#7).
+
 ## [0.3.2] - 2026-04-29
 
 ### Added

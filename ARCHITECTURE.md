@@ -109,7 +109,9 @@ entry to the LRU `_reasoningCache`, and persists to `globalState`
 
 1. computes the same fingerprint from `msg.content` and `msg.tool_calls`;
 2. looks up `_reasoningCache.get(fp)` — on hit, sets `msg.reasoning_content`;
-3. on miss, logs but does not throw — we let DeepSeek be the authority on whether the request is valid.
+3. on miss, sets `msg.reasoning_content = ""` as fallback. The model loses
+   that turn's reasoning context but the conversation survives instead of
+   deadlocking on a guaranteed 400. Cache misses are logged for diagnostics.
 
 ## Fingerprint algorithm: why hybrid
 
