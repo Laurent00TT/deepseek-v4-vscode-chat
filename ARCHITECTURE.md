@@ -69,6 +69,33 @@ to the UI. The user's chat input box will still let them resend; we don't
 bind a "Retry" button to any chat-host command (no stable, panel-agnostic
 retry command exists in the public VS Code API).
 
+## Design decision: stable API only, no proposed API
+
+VS Code exposes a `LanguageModelThinkingPart` *proposed* API for streaming and round-tripping chain-of-thought as a first-class chat part. We deliberately do **not** opt into it. The extension uses reflection (`(vscode as Record)["LanguageModelThinkingPart"]`) to *opportunistically* emit a `ThinkingPart` if the constructor happens to be present at runtime, and falls back to a one-shot `💭 Thinking...` `LanguageModelTextPart` otherwise.
+
+### Why we stay on stable API
+
+1. **Distribution.** VS Code Marketplace will not publish an extension that declares `enabledApiProposals`. Even side-loaded, the user must launch VS Code with `--enable-proposed-api Laurent00TT.deepseek-v4-vscode-chat` for the proposal to actually engage. Realistic only on Insiders. Our target audience is stable VS Code + GitHub Copilot Chat — opting in would close the main install path.
+2. **Stability.** Proposed APIs change shape between VS Code releases. We would be on the hook to follow [microsoft/vscode#246993](https://github.com/microsoft/vscode/issues/246993) and ship breaking updates each minor.
+3. **No functional gap.** The local reasoning cache (next section) already round-trips `reasoning_content` reliably. The proposed API would replace the cache with a host-managed equivalent, but the cache is already shipped, persisted, fingerprint-deduped, and integration-tested. Switching would be churn for parity.
+
+### What we lose by not opting in
+
+- The thinking stream renders as plain text plus a leading `💭 Thinking...` line, not the native collapsible thinking UI Copilot uses for first-party providers.
+- Reasoning is not round-tripped through the host's chat history — we maintain it ourselves in `_reasoningCache`.
+
+Both are accepted trade-offs.
+
+### When to revisit this decision
+
+Re-evaluate (and possibly switch) **only if** one of the following holds:
+
+- **`LanguageModelThinkingPart` graduates to stable API.** Our reflection path then auto-engages with zero code changes; we'd additionally consider deleting `_reasoningCache` if the host starts persisting thinking parts in chat history.
+- **A reasoning round-trip scenario emerges that the cache cannot cover.** Today the dual-mode fingerprint (`tc:` / `tx:` prefix) plus `globalState` persistence plus `reasoning_content=""` fallback covers every case we've encountered. If a future failure mode resists all three layers, the proposed API's host-side round-trip becomes worth its distribution cost.
+- **Distribution model changes.** If the project ever pivots to Insiders-only or developer-preview audience, the cost calculus inverts.
+
+Until one of these triggers, the answer stays "no proposed API."
+
 ## The core challenge: cross-turn reasoning_content round-trip
 
 ### Problem
