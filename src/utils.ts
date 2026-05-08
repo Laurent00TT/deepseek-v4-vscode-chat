@@ -332,10 +332,25 @@ function collectToolResultText(pr: { content?: ReadonlyArray<unknown> }): string
 		} else if (typeof c === "string") {
 			text += c;
 		} else {
-			try {
-				text += JSON.stringify(c);
-			} catch {
-				/* ignore */
+			// VS Code 1.118+ appends an internal LanguageModelDataPart
+			// sentinel (mimeType "cache_control", data "ephemeral") at the
+			// end of tool-result turns; the matching enum is private, so a
+			// fallback JSON.stringify(c) here used to inject
+			// {"$mid":24,"mimeType":"cache_control","data":"ZXBoZW1lcmFs"}
+			// into tool output the model sees (see issue #11). Drop everything
+			// non-text now, but warn on truly novel parts — quiet on the
+			// known sentinel — so future host changes show up in the
+			// Extension Host devtools without spamming users.
+			const isObj = !!c && typeof c === "object";
+			const mimeType = isObj ? (c as { mimeType?: unknown }).mimeType : undefined;
+			if (mimeType !== "cache_control") {
+				const ctor = isObj
+					? (Object.getPrototypeOf(c as object) as { constructor?: { name?: string } } | undefined)
+							?.constructor?.name
+					: undefined;
+				console.warn(
+					`[DeepSeek V4] dropped unknown tool-result part: ctor=${ctor ?? typeof c} mimeType=${String(mimeType)}`
+				);
 			}
 		}
 	}

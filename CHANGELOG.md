@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [released]
 
+## [0.3.5] - 2026-05-08
+
+### Fixed
+
+- Tool-result text no longer carries VS Code 1.118+'s internal
+  `cache_control` / `ephemeral` sentinel
+  (`{"$mid":24,"mimeType":"cache_control","data":"ZXBoZW1lcmFs"}`),
+  which the previous `JSON.stringify` fallback in `collectToolResultText`
+  was injecting at the end of tool-call results — causing models to
+  hallucinate trailing garbage and "fix" valid files (#11). Switched to
+  a defensive whitelist (text parts and strings only), with a one-time
+  `console.warn` for any future novel part type. Upstream:
+  [microsoft/vscode#313920](https://github.com/microsoft/vscode/issues/313920).
+
 ## [0.3.4] - 2026-05-01
 
 ### Added
