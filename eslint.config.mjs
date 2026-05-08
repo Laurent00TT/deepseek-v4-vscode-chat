@@ -15,6 +15,7 @@ export default tseslint.config(
 			'out',
 			'test',
 			'scripts',
+			'docs',
 			'**/*.d.ts'
 		]
 	},
