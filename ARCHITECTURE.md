@@ -100,17 +100,23 @@ Until one of these triggers, the answer stays "no proposed API."
 
 ### Problem
 
-DeepSeek V4 thinking-mode multi-turn rule (verified empirically and consistent with the official Tool Calls sample code):
+DeepSeek V4 thinking-mode multi-turn rule (originally tight, **server behavior relaxed around 2026-05** based on standalone integration runs in `test/`):
 
-> **When `tools` is non-empty in the request, every prior assistant turn in the `messages` array must carry its original `reasoning_content`, regardless of whether that turn itself produced any `tool_calls`.**
+> **A prior assistant turn that itself contained `tool_calls` should carry its original `reasoning_content` on the next request.** Other prior assistant turns (plain text replies) used to require it too when `tools` was advertised, but the server now accepts requests that omit it for those turns.
 
-VS Code's chat history is modeled after the OpenAI Chat Completions schema. **There is no field for `reasoning_content`.** By the time Copilot Chat hands `messages` back to us on the next request, every assistant turn has only `content` and `tool_calls` left — the reasoning has already been dropped.
+We still attach `reasoning_content` to **every** prior assistant turn we have cache for. Reasons: (a) sending more is harmless, (b) it preserves prompt-cache prefix bytes when the same conversation continues (the prefix must be byte-identical to hit DS server cache), and (c) it future-proofs against the server tightening the rule again.
 
-Forwarding messages as-is to DeepSeek triggers HTTP 400:
+When we have no cached reasoning for a tool-call turn, we used to fall back to `reasoning_content = ""` to avoid a guaranteed 400. The empty-string fallback is still in place because it's the conservative choice — but the integration tests in `test/integration_cache_miss_fallback.mjs` show the server now also accepts the turn being omitted entirely.
+
+VS Code's chat history is modeled after the OpenAI Chat Completions schema. **There is no field for `reasoning_content`.** By the time Copilot Chat hands `messages` back to us on the next request, every assistant turn has only `content` and `tool_calls` left — the reasoning has already been dropped, so we re-attach from our local cache.
+
+Forwarding a tool_call turn without restored `reasoning_content` historically triggered HTTP 400 with:
 
 ```text
 The reasoning_content in the thinking mode must be passed back to the API.
 ```
+
+The 400 is still possible for tool-call turns under strict server modes, so the round-trip mechanism is load-bearing for correctness, not just optimisation.
 
 ### Solution: local reasoning cache + fingerprint index
 

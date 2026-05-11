@@ -140,6 +140,18 @@ export class ReasoningCache {
 		return this.buffer.length;
 	}
 
+	/** Wipe every entry. Used by the user-facing
+	 * `deepseekv4.clearReasoningCache` command — reasoning_content can
+	 * contain private code, paths, and intermediate state from earlier
+	 * sessions, so we give the user a clean way to purge it. */
+	clear(): void {
+		const count = this.buffer.length;
+		this.buffer = [];
+		this._totalBytes = 0;
+		this._totalEvictions += count;
+		this.onChange?.();
+	}
+
 	/** Diagnostic: list current keys in eviction order (oldest first). */
 	keys(): string[] {
 		return this.buffer.map((e) => e.fingerprint);

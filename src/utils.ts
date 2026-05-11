@@ -198,6 +198,15 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
 		return {};
 	}
 
+	// Reject illegal tool names upfront. If we let `sanitizeFunctionName`
+	// rewrite a name like `weather.get` → `weather_get`, the model returns
+	// `weather_get`, but VS Code's host registry only knows the original —
+	// the tool call would silently route to nowhere. Refusing the request
+	// with a clear message is better than a silent black hole. For legal
+	// names (matching /^[\w-]+$/), sanitizeFunctionName below is a no-op
+	// and acts as defense in depth.
+	validateTools(tools);
+
 	const toolDefs: OpenAIFunctionToolDef[] = tools
 		.filter((t) => t && typeof t === "object")
 		.map((t) => {

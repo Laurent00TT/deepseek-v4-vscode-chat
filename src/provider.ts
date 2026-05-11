@@ -28,10 +28,17 @@ const BASE_URL = "https://api.deepseek.com/v1";
  * Order matters — VS Code shows the first entry as default. The strongest
  * variant (pro + thinking-max) is intentionally listed first.
  */
-// DS V4's context window is 1M (input+output total). All four variants are
-// configured to use the maximum reasonable allocation under that ceiling.
-// Thinking variants budget 256K output to comfortably subsume the reasoning
-// chain (Think Max needs ≥384K of reasoning budget when effort=max).
+// DS V4's context window is 1M (input + output total). V4's max output is
+// 384K (which subsumes the reasoning chain — `max_tokens` covers both the
+// hidden reasoning_content and the visible content). Thinking variants
+// budget the full 384K so max-effort reasoning chains can't be truncated.
+// Non-thinking variants only emit visible content, so 64K is plenty.
+//
+// Input budgets are sized as `1M - output budget`:
+//   - thinking variants:  1M - 384K = 640K → rounded down to 640K
+//   - non-thinking:        1M - 64K = 960K → rounded down to 960K
+// (We keep slightly conservative rounding to avoid edge-case overflows
+// when the server's tokenizer disagrees with our estimator.)
 //
 // `reasoning_effort` is read from the `deepseekv4.reasoningEffort` user
 // setting at request time, not stored on the variant.
@@ -44,8 +51,8 @@ const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 		tooltip: "DeepSeek V4 Pro — strongest, extended thinking",
 		apiModel: "deepseek-v4-pro",
 		thinking: true,
-		maxInputTokens: 720896,   // 704K
-		maxOutputTokens: 262144,  // 256K (subsumes the 384K reasoning chain budget)
+		maxInputTokens: 655360,   // 640K (= 1M - 384K output)
+		maxOutputTokens: 393216,  // 384K (covers reasoning chain + visible content)
 	},
 	{
 		id: "deepseek-v4-pro",
@@ -53,7 +60,7 @@ const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 		tooltip: "DeepSeek V4 Pro — strong, no extended thinking, lower latency",
 		apiModel: "deepseek-v4-pro",
 		thinking: false,
-		maxInputTokens: 917504,   // 896K
+		maxInputTokens: 983040,   // 960K (= 1M - 64K output)
 		maxOutputTokens: 65536,   // 64K
 	},
 	{
@@ -62,8 +69,8 @@ const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 		tooltip: "DeepSeek V4 Flash — cheapest with extended thinking",
 		apiModel: "deepseek-v4-flash",
 		thinking: true,
-		maxInputTokens: 720896,   // 704K
-		maxOutputTokens: 262144,  // 256K
+		maxInputTokens: 655360,   // 640K (= 1M - 384K output)
+		maxOutputTokens: 393216,  // 384K
 	},
 	{
 		id: "deepseek-v4-flash",
@@ -71,7 +78,7 @@ const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 		tooltip: "DeepSeek V4 Flash — cheapest, no extended thinking",
 		apiModel: "deepseek-v4-flash",
 		thinking: false,
-		maxInputTokens: 917504,   // 896K
+		maxInputTokens: 983040,   // 960K (= 1M - 64K output)
 		maxOutputTokens: 65536,   // 64K
 	},
 ];
@@ -155,39 +162,27 @@ async function fetchWithRetry(
 }
 
 /**
- * Per-million-token regular pricing for both currencies, snapshot 2026-04 from
- * https://api-docs.deepseek.com/quick_start/pricing and the zh-cn version.
+ * Session cost is computed by diffing /user/balance before vs after each
+ * request, NOT by multiplying token counts by a hardcoded price table.
  *
- * NOTE: deepseek-v4-pro is on a limited-time 75% discount through 2026-05-05.
- * We use REGULAR price here on purpose so the cost figure shown to the user
- * is an upper bound (real billing during the promo will be ~25% of this).
- * If you want exact-match-to-billing, swap to discount price for Pro:
- *   USD: cacheHit 0.03625, cacheMiss 0.435, output 0.87
- *   CNY: cacheHit 0.25,    cacheMiss 3,     output 6
+ * Rationale: DeepSeek's prices change (cache-hit input was cut to 1/10
+ * on 2026-04-26, the Pro 75%-off discount has been extended multiple
+ * times — most recently to 2026-05-31), so any local PRICING table is
+ * guaranteed to drift and silently overcharge or undercharge users.
+ * Letting the /user/balance endpoint be the source of truth means
+ * session-spend always equals the real bill.
  *
- * TODO: add EUR / GBP / JPY price tables when DeepSeek rolls out billing in
- * those regions. Today, accounts billed in any non-USD/CNY currency get a
- * USD-priced estimate plus the "Cost estimation uses USD pricing" tooltip
- * warning — the warning is the truth, not the displayed number.
+ * Trade-offs accepted:
+ *   (a) session-spend is debounced ~1.5s behind the latest refresh, so
+ *       the figure shown lags one chat completion;
+ *   (b) shared accounts see other users' spend mixed in;
+ *   (c) mid-session top-ups manifest as a one-shot session-spend reset
+ *       (we detect the balance jumping up and re-anchor startBalance).
+ *
+ * Per-turn token counts (prompt_tokens, prompt_cache_hit_tokens, etc.)
+ * are still pulled from API `usage` and surfaced in the status bar and
+ * tooltip — that part doesn't depend on pricing.
  */
-const PRICING = {
-	USD: {
-		"deepseek-v4-pro":   { cacheHit: 0.145, cacheMiss: 1.74, output: 3.48 },
-		"deepseek-v4-flash": { cacheHit: 0.028, cacheMiss: 0.14, output: 0.28 },
-	},
-	CNY: {
-		"deepseek-v4-pro":   { cacheHit: 1.0,   cacheMiss: 12.0, output: 24.0 },
-		"deepseek-v4-flash": { cacheHit: 0.2,   cacheMiss: 1.0,  output: 2.0  },
-	},
-} as const;
-
-type PricingCurrency = keyof typeof PRICING;
-
-/** Approximate USD↔CNY rate for converting a previously-accumulated session
- * total when the user first fetches their balance and we discover the
- * account currency differs from our default. DS internally uses ~6.9–7.14
- * depending on the model; 7 is good enough for a one-shot conversion. */
-const USD_TO_CNY_RATE = 7;
 
 interface DSUsage {
 	prompt_tokens?: number;
@@ -228,18 +223,6 @@ function currencySymbol(currency: string): string {
 	}
 }
 
-function estimateCost(
-	apiModel: keyof typeof PRICING.USD,
-	usage: DSUsage,
-	currency: PricingCurrency,
-): number {
-	const p = PRICING[currency][apiModel];
-	const hit = usage.prompt_cache_hit_tokens ?? 0;
-	const miss = usage.prompt_cache_miss_tokens ?? Math.max(0, (usage.prompt_tokens ?? 0) - hit);
-	const out = usage.completion_tokens ?? 0;
-	return (hit * p.cacheHit + miss * p.cacheMiss + out * p.output) / 1_000_000;
-}
-
 /**
  * JSON.stringify that swallows circular refs and BigInt instead of crashing.
  */
@@ -249,6 +232,80 @@ function safeStringify(value: unknown): string {
 	} catch {
 		return String(value);
 	}
+}
+
+/**
+ * Surface a context-window-overflow error with actionable buttons. Used
+ * by both the local pre-check (estimated tokens exceed maxInputTokens)
+ * and the API-side 400 detection that recognises "context length
+ * exceeded" style errors. Centralising the UX keeps both paths consistent
+ * — users see the same dialog whether the overflow was caught locally or
+ * by the server.
+ */
+async function showContextOverflowGuidance(detail: string): Promise<void> {
+	const choice = await vscode.window.showErrorMessage(
+		`DeepSeek context window exceeded. ${detail} Start a new chat or shorten the conversation.`,
+		"Start New Chat",
+		"Show Log",
+	);
+	if (choice === "Start New Chat") {
+		void vscode.commands.executeCommand("workbench.action.chat.newChat");
+	} else if (choice === "Show Log") {
+		void vscode.commands.executeCommand("deepseekv4.showLog");
+	}
+}
+
+/**
+ * Detect breakdown of DeepSeek's server-side prompt cache caused by local
+ * reasoning_cache misses. Causal chain: reasoning_cache miss → empty
+ * reasoning_content stub → broken prefix → server prompt cache collapses.
+ *
+ * We deliberately gate on `reasoningMissesThisTurn > 0` rather than raw
+ * hit-rate delta — model switches, tool list changes, and host history
+ * trim all legitimately drop the hit rate but aren't actionable bugs and
+ * shouldn't pop a warning. The peakHitRate gate excludes users whose
+ * cache never worked in the first place (e.g. they keep mutating the
+ * system prompt) — that's a different problem.
+ */
+function shouldWarnCacheBreakdown(
+	currHitRate: number,
+	peakHitRate: number,
+	reasoningMissesThisTurn: number,
+	lastWarnTime: number | undefined,
+): boolean {
+	if (lastWarnTime && Date.now() - lastWarnTime < 5 * 60_000) {
+		return false;
+	}
+	if (reasoningMissesThisTurn === 0) {
+		return false;
+	}
+	if (peakHitRate < 0.70) {
+		return false;
+	}
+	if (currHitRate > 0.20) {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Unicode block-progress glyphs for the status-bar context-usage segment.
+ * Pick a glyph proportional to (used / max) so the user can read the
+ * fill level at a glance without having to parse the percentage.
+ */
+const PROGRESS_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+function pickProgressBlock(pct: number): string {
+	if (pct <= 0) {
+		return PROGRESS_BLOCKS[0];
+	}
+	if (pct >= 1) {
+		return PROGRESS_BLOCKS[7];
+	}
+	return PROGRESS_BLOCKS[Math.min(7, Math.floor(pct * 8))];
+}
+
+function formatTokenK(tokens: number): string {
+	return `${(tokens / 1024).toFixed(1)}K`;
 }
 
 /**
@@ -313,6 +370,31 @@ async function notifyApiError(status: number, summary: string): Promise<void> {
 			} else if (choice === "Show Log") {
 				void vscode.commands.executeCommand("deepseekv4.showLog");
 			}
+			return;
+		}
+		// 400 can also be a context-window overflow that slipped past our
+		// local pre-check (estimator is ~30% off in either direction).
+		//
+		// Verified DeepSeek canonical error body (direct call to
+		// api.deepseek.com, type=invalid_request_error):
+		//   "This model's maximum context length is 65536 tokens. However,
+		//    you requested 73402 tokens (73402 in the messages, 0 in the
+		//    completion). Please reduce the length of the messages or
+		//    completion."
+		// The first two clauses match the canonical body; "reduce the length"
+		// is the most distinctive fingerprint (rarely appears in unrelated
+		// errors). Remaining patterns are defensive against router/proxy
+		// rewrites (OpenRouter etc. normalise to OpenAI's code) and alternate
+		// wordings seen in DS-compatible third-party APIs.
+		if (
+			lower.includes("context length") ||
+			lower.includes("maximum context") ||
+			lower.includes("reduce the length") ||
+			lower.includes("context_length_exceeded") ||
+			lower.includes("too many tokens") ||
+			(lower.includes("tokens") && (lower.includes("exceed") || lower.includes("too long")))
+		) {
+			await showContextOverflowGuidance(summary);
 			return;
 		}
 	}
@@ -383,12 +465,33 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * calls can't overwrite each other's values mid-fetch. */
 	private _charsPerToken = 3.0;
 
-	/** Cumulative cost since session start. Currency starts as USD and is
-	 * upgraded (with conversion) the first time refreshBalance discovers the
-	 * account uses a different currency. */
-	private _sessionCost = 0;
-	private _sessionCurrency: PricingCurrency = "USD";
+	/** Account balance at the moment this session "started", used as the
+	 * anchor for `sessionSpend = startBalance - currentBalance`. Set the
+	 * first time we observe a balance, and re-anchored when:
+	 *   (a) the user calls `clearSession`, or
+	 *   (b) we observe the balance jumping UP (top-up detected).
+	 * Currency comes from `_balance.currency` directly — no manual tracking. */
+	private _sessionStartBalance?: number;
 	private _sessionRequestCount = 0;
+
+	/** Token-usage snapshot from the most recent API response. Used to render
+	 * context-window utilisation in the status bar and tooltip. Updated after
+	 * every successful chat completion — undefined before the first response.
+	 * `_lastModelMaxInputTokens` is duplicated here because refreshStatusBar
+	 * runs without a model handle and needs both values to compute the %. */
+	private _lastPromptTokens?: number;
+	private _lastMessageTokens?: number;
+	private _lastToolTokens?: number;
+	private _lastCacheHitTokens?: number;
+	private _lastModelMaxInputTokens?: number;
+
+	/** Prompt-cache hit-rate tracking for the breakdown detector. A sudden
+	 * collapse here, combined with reasoning_cache misses on the same turn,
+	 * indicates the local cache failed and the server-side prompt-cache
+	 * prefix has broken — costing the user ~12× in mis-prefix tokens. */
+	private _lastCacheHitRate?: number;
+	private _peakCacheHitRate?: number;
+	private _lastCacheWarnTime?: number;
 
 	/** Cached balance snapshot. Refreshed manually (refresh link) or
 	 * automatically (debounced after each chat completion, silent mode). */
@@ -450,6 +553,19 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				if (e.key === "deepseekv4.apiKey") {
 					this.outputChannel.appendLine("[secrets] apiKey changed elsewhere — refreshing model picker");
 					this._onDidChangeChatInfoEmitter.fire();
+					// API key change implies the account may have changed.
+					// Old _sessionStartBalance is meaningless against the new
+					// account's balance — reset everything so the next balance
+					// refresh anchors fresh.
+					this._balance = undefined;
+					this._sessionStartBalance = undefined;
+					this._sessionRequestCount = 0;
+					this.refreshStatusBar();
+				}
+			}),
+			vscode.workspace.onDidChangeConfiguration((e) => {
+				if (e.affectsConfiguration("deepseekv4.showContextUsage")) {
+					this.refreshStatusBar();
 				}
 			}),
 		);
@@ -466,9 +582,75 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		const balanceStr = this._balance
 			? `  ${currencySymbol(this._balance.currency)}${this._balance.totalBalance.toFixed(2)}`
 			: "";
-		this.statusBar.text = `$(sparkle) DS V4${balanceStr}`;
+		const ctxStr = this.formatContextSegment();
+		this.statusBar.text = ctxStr
+			? `$(sparkle) DS V4${balanceStr} | ${ctxStr}`
+			: `$(sparkle) DS V4${balanceStr}`;
 		this.statusBar.tooltip = this.buildTooltip();
+		this.statusBar.backgroundColor = this.pickContextBackgroundColor();
 		this.statusBar.show();
+	}
+
+	/** Render the `▆ 45.3%` segment. Returns "" when we don't yet have a
+	 * token-count observation from the API (first request, or after
+	 * clearSession). */
+	private formatContextSegment(): string {
+		if (!this.showContextUsage()) {
+			return "";
+		}
+		const pct = this.contextUsagePct();
+		if (pct === undefined) {
+			return "";
+		}
+		return `${pickProgressBlock(pct)} ${(pct * 100).toFixed(1)}%`;
+	}
+
+	/** Status-bar background color reflecting context-window pressure.
+	 * Thresholds match the issue request: 70% warning, 90% error. */
+	private pickContextBackgroundColor(): vscode.ThemeColor | undefined {
+		if (!this.showContextUsage()) {
+			return undefined;
+		}
+		const pct = this.contextUsagePct();
+		if (pct === undefined) {
+			return undefined;
+		}
+		if (pct >= 0.90) {
+			return new vscode.ThemeColor("statusBarItem.errorBackground");
+		}
+		if (pct >= 0.70) {
+			return new vscode.ThemeColor("statusBarItem.warningBackground");
+		}
+		return undefined;
+	}
+
+	private showContextUsage(): boolean {
+		return vscode.workspace
+			.getConfiguration("deepseekv4")
+			.get<boolean>("showContextUsage", true);
+	}
+
+	private contextUsagePct(): number | undefined {
+		if (!this._lastPromptTokens || !this._lastModelMaxInputTokens) {
+			return undefined;
+		}
+		return this._lastPromptTokens / this._lastModelMaxInputTokens;
+	}
+
+	/** Compute session spend from balance diff. Returns undefined until we
+	 * have both a startBalance anchor AND a current balance. Caller decides
+	 * what to do with a zero spend (we don't hide it here). Currency comes
+	 * from the live balance, not stored separately, so any account-currency
+	 * switch is automatically reflected. */
+	private sessionSpend(): { amount: number; currency: string } | undefined {
+		if (!this._balance || this._sessionStartBalance === undefined) {
+			return undefined;
+		}
+		// Math.max guards the race where a top-up has hit the account but
+		// our debounced refresh hasn't seen it yet — would otherwise show a
+		// briefly negative spend. The next refresh re-anchors startBalance.
+		const diff = Math.max(0, this._sessionStartBalance - this._balance.totalBalance);
+		return { amount: diff, currency: this._balance.currency };
 	}
 
 	/**
@@ -527,17 +709,46 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					`_${sym}${this._balance.grantedBalance.toFixed(2)} granted + ${sym}${this._balance.toppedUpBalance.toFixed(2)} topped up_\n\n`,
 				);
 			}
-			// Cost estimation only knows USD and CNY price tables. If the
-			// account is billed in some other currency (DS rolled out EUR/GBP
-			// trials in some regions), the session-cost figure is computed
-			// against USD pricing and will diverge from the real bill — flag
-			// that explicitly instead of silently showing a misleading number.
-			const accountCcy = this._balance.currency.toUpperCase();
-			if (accountCcy !== "USD" && accountCcy !== "CNY") {
+			// Session spend = startBalance - currentBalance. This is the
+			// real billed amount (lagged ~1.5s by debounced balance refresh)
+			// rather than a hardcoded-price estimate.
+			const spend = this.sessionSpend();
+			if (spend !== undefined && spend.amount > 0) {
+				const reqWord = this._sessionRequestCount === 1 ? "request" : "requests";
 				md.appendMarkdown(
-					`_$(warning) Cost estimation uses USD pricing — actual billing is in ${accountCcy}_\n\n`,
+					`_Session: ${sym}${spend.amount.toFixed(4)} &nbsp;·&nbsp; ${this._sessionRequestCount} ${reqWord}_\n\n`,
 				);
 			}
+		}
+
+		md.appendMarkdown("---\n\n");
+
+		// Context-usage row. Only emitted once we've seen a real prompt_tokens
+		// number from the API — before that, we can't meaningfully compare.
+		const pct = this.contextUsagePct();
+		if (this.showContextUsage() && pct !== undefined && this._lastPromptTokens && this._lastModelMaxInputTokens) {
+			const maxTokens = this._lastModelMaxInputTokens;
+			const pctStr = (pct * 100).toFixed(1);
+			md.appendMarkdown("**Context Usage**\n\n");
+			md.appendMarkdown(`- Current: ${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(maxTokens)} tokens (${pctStr}%)\n`);
+			if (this._lastMessageTokens !== undefined) {
+				const msgPct = ((this._lastMessageTokens / maxTokens) * 100).toFixed(1);
+				md.appendMarkdown(`- Messages: ~${formatTokenK(this._lastMessageTokens)} (${msgPct}%)\n`);
+			}
+			if (this._lastToolTokens !== undefined) {
+				const toolPct = ((this._lastToolTokens / maxTokens) * 100).toFixed(1);
+				md.appendMarkdown(`- Tools: ~${formatTokenK(this._lastToolTokens)} (${toolPct}%)\n`);
+			}
+			md.appendMarkdown("\n");
+		}
+
+		// Cache hit-rate row. Surfaces the cheap-vs-expensive token ratio so
+		// users can spot when their prompt cache stops working without having
+		// to dig through the log.
+		if (this._lastCacheHitRate !== undefined) {
+			const hitPctStr = (this._lastCacheHitRate * 100).toFixed(1);
+			const hitK = ((this._lastCacheHitTokens ?? 0) / 1024).toFixed(1);
+			md.appendMarkdown(`**Cache hit (last turn)** &nbsp; ${hitPctStr}% (${hitK}K cached)\n\n`);
 		}
 
 		md.appendMarkdown("---\n\n");
@@ -562,10 +773,25 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * for the cost/request tally shown in the status bar.
 	 */
 	public clearSession(): void {
-		this._sessionCost = 0;
+		// Re-anchor the session-spend baseline. If we have a current balance,
+		// use it; otherwise leave undefined so the next balance fetch will
+		// initialise it. This means sessionSpend resets to 0 the moment we
+		// next observe a balance.
+		this._sessionStartBalance = this._balance?.totalBalance;
 		this._sessionRequestCount = 0;
+		// Reset the context-usage display so the next refresh shows a clean
+		// state until the first response of the new session lands.
+		this._lastPromptTokens = undefined;
+		this._lastMessageTokens = undefined;
+		this._lastToolTokens = undefined;
+		this._lastCacheHitTokens = undefined;
+		this._lastModelMaxInputTokens = undefined;
+		this._lastCacheHitRate = undefined;
+		this._peakCacheHitRate = undefined;
+		// Intentionally NOT resetting _lastCacheWarnTime — if a breakdown
+		// fired 30s ago, a manual clearSession shouldn't unmute the throttle.
 		this.refreshStatusBar();
-		this.log("session.clear", {});
+		this.log("session.clear", { startBalance: this._sessionStartBalance });
 	}
 
 	/**
@@ -574,6 +800,48 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 */
 	public getCacheStats(): ReasoningCacheStats {
 		return this._reasoningCache.stats();
+	}
+
+	/**
+	 * Purge the local reasoning cache. Bound to `deepseekv4.clearReasoningCache`.
+	 * Use cases: user is about to share a bug log and wants to scrub thought
+	 * traces from prior sessions; user just switched projects and the cached
+	 * reasoning could leak business context cross-project; user simply hit a
+	 * persistent 400 chain and wants a clean slate.
+	 */
+	public clearReasoningCache(): void {
+		const before = this._reasoningCache.size();
+		this._reasoningCache.clear();
+		this.log("reasoning_cache.clear", { entriesRemoved: before });
+		vscode.window.showInformationMessage(
+			`Cleared ${before} reasoning cache entr${before === 1 ? "y" : "ies"}.`,
+		);
+	}
+
+	/**
+	 * Notify the user that the prompt cache is no longer benefiting them.
+	 * Triggered by `shouldWarnCacheBreakdown`. The two CTAs (start a new chat
+	 * vs inspect the cache stats) cover the two reasonable responses: cut
+	 * losses, or diagnose. Either is better than silently burning money.
+	 */
+	private async warnCacheBreakdown(
+		currHitRate: number,
+		peakHitRate: number,
+		reasoningMisses: number,
+	): Promise<void> {
+		const curr = (currHitRate * 100).toFixed(0);
+		const peak = (peakHitRate * 100).toFixed(0);
+		const missWord = reasoningMisses === 1 ? "miss" : "misses";
+		const choice = await vscode.window.showWarningMessage(
+			`DeepSeek prompt cache hit rate dropped to ${curr}% (peak ${peak}%). ${reasoningMisses} reasoning cache ${missWord} this turn — the local reasoning cache was likely evicted or lost across a restart. Continuing risks higher cost (cache-miss tokens cost ~12× more).`,
+			"Start New Chat",
+			"Show Cache Stats",
+		);
+		if (choice === "Start New Chat") {
+			void vscode.commands.executeCommand("workbench.action.chat.newChat");
+		} else if (choice === "Show Cache Stats") {
+			void vscode.commands.executeCommand("deepseekv4.showCacheStats");
+		}
 	}
 
 	private log(message: string, data?: unknown): void {
@@ -638,31 +906,35 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				}
 				return;
 			}
+			const newTotal = parseFloat(info.total_balance);
 			this._balance = {
 				currency: info.currency,
-				totalBalance: parseFloat(info.total_balance),
+				totalBalance: newTotal,
 				grantedBalance: parseFloat(info.granted_balance),
 				toppedUpBalance: parseFloat(info.topped_up_balance),
 				fetchedAt: Date.now(),
 			};
-			// Switch session currency to match the account's currency.
-			// One-shot convert the previously-accumulated cost so the running
-			// total stays consistent as the user keeps using the same session.
-			const accountCurrency = info.currency.toUpperCase();
-			if ((accountCurrency === "CNY" || accountCurrency === "USD") && accountCurrency !== this._sessionCurrency) {
-				if (this._sessionCurrency === "USD" && accountCurrency === "CNY") {
-					this._sessionCost *= USD_TO_CNY_RATE;
-				} else if (this._sessionCurrency === "CNY" && accountCurrency === "USD") {
-					this._sessionCost /= USD_TO_CNY_RATE;
-				}
-				this._sessionCurrency = accountCurrency;
+			// Anchor / re-anchor sessionStartBalance.
+			//   - undefined: first balance observation, just lock it.
+			//   - newTotal > startBalance: top-up detected → re-anchor so
+			//     sessionSpend doesn't go negative.
+			//   - newTotal <= startBalance: normal spending, leave the
+			//     anchor alone so sessionSpend keeps growing.
+			let topUpDetected = false;
+			if (this._sessionStartBalance === undefined) {
+				this._sessionStartBalance = newTotal;
+			} else if (newTotal > this._sessionStartBalance) {
+				topUpDetected = true;
+				this._sessionStartBalance = newTotal;
+				this._sessionRequestCount = 0;
 			}
 			this.log(silent ? "balance.auto_refresh" : "balance.refresh", {
 				currency: this._balance.currency,
-				total: this._balance.totalBalance,
+				total: newTotal,
 				granted: this._balance.grantedBalance,
 				topped_up: this._balance.toppedUpBalance,
-				session_currency: this._sessionCurrency,
+				session_start: this._sessionStartBalance,
+				top_up_detected: topUpDetected || undefined,
 			});
 			// Both silent and manual paths just swap the tooltip reference;
 			// the next hover renders fresh data. The manual path additionally
@@ -755,14 +1027,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		} catch {
 			return 0;
 		}
-	}
-
-	private estimateMessagesTokens(msgs: readonly vscode.LanguageModelChatMessage[]): number {
-		return Math.ceil(this.countMessageChars(msgs) / this._charsPerToken);
-	}
-
-	private estimateToolTokens(tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined): number {
-		return Math.ceil(this.countToolChars(tools) / this._charsPerToken);
 	}
 
 	/**
@@ -921,7 +1185,23 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                     return m.role;
                 }),
             });
-            this.attachReasoningToHistory(openaiMessages);
+            // Only attach reasoning_content when the current request is in
+            // thinking mode. Sending reasoning_content to a non-thinking
+            // endpoint wastes prefix tokens (server still has to tokenise it
+            // before discarding) and the empty-string fallback breaks
+            // prompt-cache prefix anyway. When user switches from a thinking
+            // variant to a non-thinking one mid-conversation, prior assistant
+            // turns may also already carry reasoning_content — strip it.
+            let reasoningStats = { hits: 0, misses: 0 };
+            if (variant.thinking) {
+                reasoningStats = this.attachReasoningToHistory(openaiMessages);
+            } else {
+                for (const m of openaiMessages) {
+                    if (m.role === "assistant" && m.reasoning_content !== undefined) {
+                        delete m.reasoning_content;
+                    }
+                }
+            }
 
 			validateRequest(messages);
 
@@ -943,7 +1223,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             const toolTokenCount = Math.ceil(toolChars / this._charsPerToken);
             const tokenLimit = Math.max(1, model.maxInputTokens);
             if (inputTokenCount + toolTokenCount > tokenLimit) {
-                console.error("[DeepSeek V4] Message exceeds token limit", { total: inputTokenCount + toolTokenCount, tokenLimit });
+                const estimated = inputTokenCount + toolTokenCount;
+                console.error("[DeepSeek V4] Message exceeds token limit", { total: estimated, tokenLimit });
+                // Fire-and-forget the friendly dialog so the throw below still
+                // returns control to the host immediately. The user sees both
+                // (an error in the chat panel plus the actionable popup) — they
+                // can dismiss whichever they want.
+                void showContextOverflowGuidance(
+                    `Estimated ${(estimated / 1024).toFixed(0)}K input tokens exceeds the ${(tokenLimit / 1024).toFixed(0)}K limit for ${model.name}.`,
+                );
                 throw new Error("Message exceeds token limit.");
             }
 
@@ -1043,12 +1331,44 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				// local `requestInputChars` captured before fetch — NOT an
 				// instance field — to stay correct under concurrent calls.
 				this.calibrateCharsPerToken(requestInputChars, usage.prompt_tokens);
-				const cost = estimateCost(variant.apiModel, usage, this._sessionCurrency);
-				this._sessionCost += cost;
 				this._sessionRequestCount += 1;
 				const promptTotal = usage.prompt_tokens ?? 0;
 				const cacheHit = usage.prompt_cache_hit_tokens ?? 0;
 				const cacheHitPct = promptTotal > 0 ? (cacheHit / promptTotal) * 100 : 0;
+
+				// Snapshot the usage numbers so the status bar and tooltip can
+				// render them. `prompt_tokens` is the API-reported total — it
+				// already includes history, so we do NOT accumulate across
+				// turns. Each turn's value supersedes the previous one.
+				this._lastPromptTokens = promptTotal;
+				const estimatedBreakdown = inputTokenCount + toolTokenCount;
+				if (promptTotal > 0 && estimatedBreakdown > 0) {
+					this._lastToolTokens = Math.round(promptTotal * (toolTokenCount / estimatedBreakdown));
+					this._lastMessageTokens = Math.max(0, promptTotal - this._lastToolTokens);
+				} else {
+					this._lastMessageTokens = promptTotal;
+					this._lastToolTokens = 0;
+				}
+				this._lastCacheHitTokens = cacheHit;
+				this._lastModelMaxInputTokens = variant.maxInputTokens;
+				const currHitRate = promptTotal > 0 ? cacheHit / promptTotal : 0;
+				this._lastCacheHitRate = currHitRate;
+				this._peakCacheHitRate = Math.max(this._peakCacheHitRate ?? 0, currHitRate);
+
+				// Detect prompt-cache breakdown caused by local reasoning-cache
+				// misses. See shouldWarnCacheBreakdown for the causal rationale.
+				if (
+					shouldWarnCacheBreakdown(
+						currHitRate,
+						this._peakCacheHitRate,
+						reasoningStats.misses,
+						this._lastCacheWarnTime,
+					)
+				) {
+					this._lastCacheWarnTime = Date.now();
+					void this.warnCacheBreakdown(currHitRate, this._peakCacheHitRate, reasoningStats.misses);
+				}
+
 				this.log("usage", {
 					prompt: promptTotal,
 					cache_hit: cacheHit,
@@ -1057,10 +1377,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					completion: usage.completion_tokens ?? 0,
 					reasoning: usage.completion_tokens_details?.reasoning_tokens ?? 0,
 					chars_per_token: this._charsPerToken.toFixed(2),
-					cost: cost.toFixed(6),
-					currency: this._sessionCurrency,
-					session_total: this._sessionCost.toFixed(4),
 					session_reqs: this._sessionRequestCount,
+					// Real cost will surface after the next balance refresh
+					// as `sessionSpend = startBalance - currentBalance`.
 				});
 				this.refreshStatusBar();
 				// Background-refresh balance after each chat (debounced).
@@ -1135,6 +1454,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	        token: vscode.CancellationToken,
 	    ): Promise<DSUsage | undefined> {
         const reader = responseBody.getReader();
+        // Bridge user-cancellation into reader.cancel() so an in-flight
+        // `await reader.read()` resolves immediately (done=true) instead of
+        // blocking until the next SSE chunk arrives. Without this, cancelling
+        // a long thinking-mode request leaves the read promise hanging until
+        // DeepSeek emits its next byte — could be tens of seconds for
+        // max-effort reasoning chains.
+        const cancelSub = token.onCancellationRequested(() => {
+            void reader.cancel().catch(() => { /* reader already closed */ });
+        });
         const decoder = new TextDecoder();
         let buffer = "";
         let lastUsage: DSUsage | undefined;
@@ -1178,6 +1506,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                 }
             }
         } finally {
+            cancelSub.dispose();
             reader.releaseLock();
             // ctx is per-call, so no leftover state needs to be cleared here —
             // it just goes out of scope when the request finishes.
@@ -1212,12 +1541,21 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		// so you can watch the model think in real time.
 		const reasoningChunk = deltaObj?.reasoning_content;
 		if (typeof reasoningChunk === "string" && reasoningChunk.length > 0) {
-			if (ctx.reasoning === "") {
+			const logRawReasoning = vscode.workspace
+				.getConfiguration("deepseekv4")
+				.get<boolean>("logRawReasoning", false);
+			if (ctx.reasoning === "" && logRawReasoning) {
 				// First reasoning chunk this turn — mark the section start.
 				this.outputChannel.appendLine(`[${new Date().toISOString().slice(11, 23)}] thinking.start ▼`);
 			}
 			ctx.reasoning += reasoningChunk;
-			this.outputChannel.append(reasoningChunk);
+			// Raw reasoning may contain private code/paths/intermediate state.
+			// Gated behind `deepseekv4.logRawReasoning` (default off). The
+			// `thinking.end` summary line in persistReasoningForTurn still
+			// fires regardless, so users see *that* reasoning happened.
+			if (logRawReasoning) {
+				this.outputChannel.append(reasoningChunk);
+			}
 			const ThinkingCtor = (vscode as unknown as Record<string, unknown>)["LanguageModelThinkingPart"] as
 				| (new (text: string, id?: string, metadata?: unknown) => unknown)
 				| undefined;
@@ -1334,8 +1672,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             return;
         }
         // Close out the live thinking stream with a newline so subsequent
-        // structured log lines render cleanly.
-        this.outputChannel.appendLine("");
+        // structured log lines render cleanly. The summary line fires
+        // unconditionally so users know reasoning happened even when raw
+        // streaming is gated off (`deepseekv4.logRawReasoning` = false).
+        const logRawReasoning = vscode.workspace
+            .getConfiguration("deepseekv4")
+            .get<boolean>("logRawReasoning", false);
+        if (logRawReasoning) {
+            this.outputChannel.appendLine("");
+        }
         this.outputChannel.appendLine(`[${new Date().toISOString().slice(11, 23)}] thinking.end ▲ (${ctx.reasoning.length} chars)`);
         const fp = fingerprintAssistantTurn({
             text: ctx.emittedText,
@@ -1399,7 +1744,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
      * guaranteed 400 from the API. The conversation may be slightly degraded
      * (the model loses one turn's reasoning context) but can continue.
      */
-    private attachReasoningToHistory(messages: OpenAIChatMessage[]): void {
+    private attachReasoningToHistory(messages: OpenAIChatMessage[]): { hits: number; misses: number } {
         let hits = 0;
         let misses = 0;
         for (const msg of messages) {
@@ -1443,6 +1788,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
         if (hits + misses > 0) {
             this.log("cache.attach", { hits, misses, total: hits + misses });
         }
+        return { hits, misses };
     }
 
 	/**

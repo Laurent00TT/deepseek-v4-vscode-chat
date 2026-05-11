@@ -61,6 +61,7 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | `Refresh DeepSeek V4 Balance` | Fetch the latest account balance |
 | `Show DeepSeek V4 Log` | Open the runtime log channel |
 | `Show DeepSeek V4 Reasoning Cache Stats` | Diagnostics for the reasoning cache |
+| `Clear DeepSeek V4 Reasoning Cache` | Purge cached `reasoning_content` (e.g. before sharing a bug log, or after switching projects) |
 | `Clear DeepSeek V4 Session Counter` | Reset the session spend display |
 
 ## Settings
@@ -68,6 +69,8 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | Setting | Values | Default | Description |
 | ------ | ------ | ------ | ------ |
 | `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for `(thinking)` model variants. `high` is faster with shorter reasoning chains; `max` is the deepest setting. No effect on non-thinking variants. Picked up at request time. |
+| `deepseekv4.showContextUsage` | `boolean` | `true` | Show the `▆ XX%` context-window usage segment in the status bar. Disable to hide both the inline indicator and the warning/error background colors. |
+| `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream the raw `reasoning_content` to the OutputChannel. Useful for debugging prompt-cache breakdowns but may capture private code/paths/intermediate state — keep **off** when sharing logs in bug reports. |
 
 ## License
 

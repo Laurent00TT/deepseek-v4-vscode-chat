@@ -8,6 +8,7 @@ const SHOW_LOG_COMMAND = "deepseekv4.showLog";
 const REFRESH_BALANCE_COMMAND = "deepseekv4.refreshBalance";
 const CLEAR_SESSION_COMMAND = "deepseekv4.clearSession";
 const SHOW_CACHE_STATS_COMMAND = "deepseekv4.showCacheStats";
+const CLEAR_REASONING_CACHE_COMMAND = "deepseekv4.clearReasoningCache";
 const VENDOR = "deepseek-v4";
 const WELCOME_SHOWN_KEY = "deepseekv4.welcomeShown";
 // publisher.name#walkthroughId — must match package.json's `publisher` and
@@ -65,13 +66,16 @@ export function activate(context: vscode.ExtensionContext) {
 		context.globalState,
 		statusBar,
 	);
-	vscode.lm.registerLanguageModelChatProvider(VENDOR, provider);
-	context.subscriptions.push({ dispose: () => provider.dispose() });
+	context.subscriptions.push(
+		vscode.lm.registerLanguageModelChatProvider(VENDOR, provider),
+		{ dispose: () => provider.dispose() },
+	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand(SHOW_LOG_COMMAND, () => outputChannel.show()),
 		vscode.commands.registerCommand(REFRESH_BALANCE_COMMAND, () => provider.refreshBalance()),
 		vscode.commands.registerCommand(CLEAR_SESSION_COMMAND, () => provider.clearSession()),
+		vscode.commands.registerCommand(CLEAR_REASONING_CACHE_COMMAND, () => provider.clearReasoningCache()),
 		vscode.commands.registerCommand(SHOW_CACHE_STATS_COMMAND, () => {
 			const stats = provider.getCacheStats();
 			const hitPct = (stats.hitRate * 100).toFixed(1);
