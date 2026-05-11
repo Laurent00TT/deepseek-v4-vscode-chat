@@ -289,19 +289,22 @@ function shouldWarnCacheBreakdown(
 }
 
 /**
- * Unicode block-progress glyphs for the status-bar context-usage segment.
- * Pick a glyph proportional to (used / max) so the user can read the
- * fill level at a glance without having to parse the percentage.
+ * Tier color for the context-usage percentage. The percentage is the only
+ * animated signal in the status bar — everything else stays neutral gray —
+ * so its color is the at-a-glance pressure indicator.
+ *
+ *   < 50%  → sky    (#7dd3fc)  healthy
+ *   < 80%  → amber  (#fbbf24)  warning
+ *   ≥ 80%  → red    (#f87171)  danger
  */
-const PROGRESS_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-function pickProgressBlock(pct: number): string {
-	if (pct <= 0) {
-		return PROGRESS_BLOCKS[0];
+function pickPctTierColor(pct: number): string {
+	if (pct >= 0.80) {
+		return "#f87171";
 	}
-	if (pct >= 1) {
-		return PROGRESS_BLOCKS[7];
+	if (pct >= 0.50) {
+		return "#fbbf24";
 	}
-	return PROGRESS_BLOCKS[Math.min(7, Math.floor(pct * 8))];
+	return "#7dd3fc";
 }
 
 function formatTokenK(tokens: number): string {
@@ -580,48 +583,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 
 	private refreshStatusBar(): void {
 		const balanceStr = this._balance
-			? `  ${currencySymbol(this._balance.currency)}${this._balance.totalBalance.toFixed(2)}`
+			? ` ${currencySymbol(this._balance.currency)}${this._balance.totalBalance.toFixed(2)}`
 			: "";
-		const ctxStr = this.formatContextSegment();
-		this.statusBar.text = ctxStr
-			? `$(sparkle) DS V4${balanceStr} | ${ctxStr}`
-			: `$(sparkle) DS V4${balanceStr}`;
+		const pct = this.showContextUsage() ? this.contextUsagePct() : undefined;
+		const pctStr = pct !== undefined ? ` | ${(pct * 100).toFixed(1)}%` : "";
+
+		// Single item: `V₄ ¥7.76 | 10.1%`. VS Code statusBarItem.color is
+		// item-wide — there's no way to tint only the percentage without
+		// also tinting V₄ and the balance. Cohabiting in one item is the
+		// priority (avoids other extensions like "No Environment" splitting
+		// us in two), so we forgo local tinting entirely. The tooltip still
+		// surfaces 70%/90% warnings textually.
+		this.statusBar.text = `V₄${balanceStr}${pctStr}`;
+		this.statusBar.color = new vscode.ThemeColor("descriptionForeground");
 		this.statusBar.tooltip = this.buildTooltip();
-		this.statusBar.backgroundColor = this.pickContextBackgroundColor();
+		this.statusBar.backgroundColor = undefined;
 		this.statusBar.show();
-	}
-
-	/** Render the `▆ 45.3%` segment. Returns "" when we don't yet have a
-	 * token-count observation from the API (first request, or after
-	 * clearSession). */
-	private formatContextSegment(): string {
-		if (!this.showContextUsage()) {
-			return "";
-		}
-		const pct = this.contextUsagePct();
-		if (pct === undefined) {
-			return "";
-		}
-		return `${pickProgressBlock(pct)} ${(pct * 100).toFixed(1)}%`;
-	}
-
-	/** Status-bar background color reflecting context-window pressure.
-	 * Thresholds match the issue request: 70% warning, 90% error. */
-	private pickContextBackgroundColor(): vscode.ThemeColor | undefined {
-		if (!this.showContextUsage()) {
-			return undefined;
-		}
-		const pct = this.contextUsagePct();
-		if (pct === undefined) {
-			return undefined;
-		}
-		if (pct >= 0.90) {
-			return new vscode.ThemeColor("statusBarItem.errorBackground");
-		}
-		if (pct >= 0.70) {
-			return new vscode.ThemeColor("statusBarItem.warningBackground");
-		}
-		return undefined;
 	}
 
 	private showContextUsage(): boolean {
@@ -740,6 +717,20 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				md.appendMarkdown(`- Tools: ~${formatTokenK(this._lastToolTokens)} (${toolPct}%)\n`);
 			}
 			md.appendMarkdown("\n");
+			// Explain where the input cap comes from. V4's 1M is shared
+			// between input and output, so thinking variants (which reserve
+			// 384K for the reasoning chain) get less input headroom than
+			// non-thinking variants. Heuristic on _lastModelMaxInputTokens
+			// avoids needing to remember which variant the last request used.
+			if (this._lastModelMaxInputTokens && this._lastModelMaxInputTokens < 700_000) {
+				md.appendMarkdown(
+					`_Cap = 1M − 384K reserved for thinking chain. Non-thinking variants get 960K input._\n\n`,
+				);
+			}
+			// `~` prefix on Messages/Tools above signals these are estimates
+			// (server returns only the combined prompt_tokens; the
+			// messages-vs-tools split is derived from local char counts).
+			md.appendMarkdown(`_~ = estimated (only the total is server-reported)_\n\n`);
 		}
 
 		// Cache hit-rate row. Surfaces the cheap-vs-expensive token ratio so

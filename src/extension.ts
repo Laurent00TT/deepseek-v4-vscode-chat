@@ -55,6 +55,11 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(outputChannel);
 	outputChannel.appendLine(`[boot] ext=${extVersion} vscode=${vscodeVersion}`);
 
+	// Single status bar item carrying `V₄ ¥X.XX | Y.Y%`. We tried splitting
+	// the pct out so it could carry its own tier color, but other extensions
+	// (e.g. Python "No Environment") with priority in between would slot
+	// themselves between the two items, breaking the visual cohesion. The
+	// pct losing its tier color is the smaller of the two evils.
 	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	statusBar.command = SHOW_LOG_COMMAND;
 	context.subscriptions.push(statusBar);
