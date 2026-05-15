@@ -545,6 +545,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					this._sessionStartBalance = undefined;
 					this._sessionRequestCount = 0;
 					this.refreshStatusBar();
+					// Kick off a silent refresh to (a) re-establish the session
+					// baseline against the new account, and (b) populate the
+					// status bar without waiting for the next chat completion.
+					// Without this, `scheduleBalanceRefresh` short-circuits on
+					// `!this._balance` and the user has to manually click the
+					// "refresh" link before sessionSpend starts working again.
+					void this.refreshBalance(true);
 				}
 			}),
 			vscode.workspace.onDidChangeConfiguration((e) => {
