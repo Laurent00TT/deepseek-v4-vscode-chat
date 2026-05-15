@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [released]
 
+## [0.3.7] - 2026-05-12
+
+### Added
+
+- **Context-usage indicator in status bar.** Live `X.X%` of the context window used, tiered by pressure: sky blue under 50%, amber 50–80%, red at or above 80%. Tooltip shows a Current / Messages / Tools breakdown plus a Cap explanation (`1M − 384K reserved for thinking chain`).
+- **`Clear DeepSeek V4 Reasoning Cache` command** for scrubbing private state from globalState before sharing logs or switching projects. Awaits a hard `globalState.update` flush before reporting success, so a reload immediately after clearing cannot restore stale reasoning.
+- **`deepseekv4.showContextUsage` setting** to toggle the status-bar percentage indicator.
+- **`deepseekv4.logRawReasoning` setting** (default `false`) gates streaming of raw `reasoning_content` to the OutputChannel. Previously the channel captured every reasoning byte unconditionally, which could leak private code, paths, or intermediate state into bug-report logs.
+- **Cache-hit-rate display in tooltip** plus a breakdown warning when local reasoning-cache misses cause server-side prompt-cache prefix to collapse. Throttled to at most one warning per 5 minutes.
+- **Actionable error dialog for HTTP 400 context-overflow.** Detects "maximum context length" / "reduce the length" wording from DeepSeek and surfaces Start New Chat / Show Log buttons instead of a cryptic 400.
+
+### Changed
+
+- **Session cost now derived from `/user/balance` diff** instead of a hardcoded price table. The displayed figure always matches the real bill regardless of DeepSeek's frequent price changes (e.g. the cache-hit input cut to 1/10 on 2026-04-26, and the Pro 75%-off discount extended to 2026-05-31). Currency follows the account directly.
+- **Tool-name validation is strict.** Names that `sanitizeFunctionName` would rewrite — digit-leading (`1tool`), underscore-leading (`_private`), consecutive underscores (`foo__bar`), or longer than 64 chars — are now rejected with an actionable error showing the rewrite that would have happened. Previously such names were silently rewritten before send, and the model's echo didn't match VS Code's registry, so the tool call routed nowhere.
+- **Reasoning-content attachment is thinking-mode only.** Switching from a thinking to a non-thinking variant strips stale `reasoning_content` from prior assistant turns instead of forwarding it.
+- **Thinking variants now configure `maxOutputTokens = 384K`** to cover the full reasoning-chain budget at max effort (was 256K, which silently truncated long chains). Input budgets recomputed as `1M − maxOutputTokens` to honour DeepSeek's combined 1M ceiling.
+- **`ARCHITECTURE.md` cross-turn rule relaxed** to reflect the 2026-05 server behaviour: DeepSeek now accepts requests that omit `reasoning_content` on non-tool-call assistant turns, even when `tools` is advertised.
+
+### Fixed
+
+- **Cancellation now interrupts streaming reads immediately.** The cancellation token is bridged into `reader.cancel()` inside `processStreamingResponse`; previously cancelling a long thinking-mode request would hang `await reader.read()` for tens of seconds waiting for the next SSE chunk.
+- **API key change re-anchors session baseline.** A silent `refreshBalance(true)` fires after the secret listener resets state, so session-spend tracking keeps working after a key swap without requiring the user to manually click the refresh link.
+- **`registerLanguageModelChatProvider` Disposable** is now pushed into `context.subscriptions` so it disposes cleanly on extension deactivate.
+
+### Removed
+
+- Hardcoded `PRICING` USD/CNY tables and `estimateCost` function (replaced by balance-diff session spend, see Changed).
+- Dead `.vscode-test.mjs` config pointing at a non-existent `out/test/**/*.test.js`.
+- Unconditional raw-reasoning streaming to OutputChannel (now gated by `deepseekv4.logRawReasoning`).
+
 ## [0.3.5] - 2026-05-08
 
 ### Fixed

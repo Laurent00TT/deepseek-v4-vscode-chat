@@ -246,7 +246,9 @@ In thinking mode DeepSeek ignores `temperature`, `top_p`, `presence_penalty`, an
 - `prompt_tokens` / `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
 - `completion_tokens` / `completion_tokens_details.reasoning_tokens`
 
-A two-currency pricing table (USD + CNY) handles cost estimation; the active currency follows the account balance.
+Session cost is derived from `/user/balance` diff (`sessionSpend = startBalance − currentBalance`), not from a hardcoded price table. This means the figure shown in the tooltip always matches the real bill — DeepSeek's prices change (cache-hit input was cut to 1/10 on 2026-04-26, Pro 75%-off has been extended multiple times) and any local table would drift. Trade-offs: session spend lags ~1.5s behind the debounced balance refresh; shared accounts see other users' spend mixed in; mid-session top-ups manifest as a one-shot re-anchor of `startBalance`.
+
+The per-turn token counts (`prompt_tokens`, `prompt_cache_hit_tokens`, etc.) are still surfaced in the status-bar tooltip — they're cheap to read from `usage` and don't depend on pricing.
 
 ### Errors and retry
 
