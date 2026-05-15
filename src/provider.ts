@@ -288,25 +288,6 @@ function shouldWarnCacheBreakdown(
 	return true;
 }
 
-/**
- * Tier color for the context-usage percentage. The percentage is the only
- * animated signal in the status bar — everything else stays neutral gray —
- * so its color is the at-a-glance pressure indicator.
- *
- *   < 50%  → sky    (#7dd3fc)  healthy
- *   < 80%  → amber  (#fbbf24)  warning
- *   ≥ 80%  → red    (#f87171)  danger
- */
-function pickPctTierColor(pct: number): string {
-	if (pct >= 0.80) {
-		return "#f87171";
-	}
-	if (pct >= 0.50) {
-		return "#fbbf24";
-	}
-	return "#7dd3fc";
-}
-
 function formatTokenK(tokens: number): string {
 	return `${(tokens / 1024).toFixed(1)}K`;
 }
