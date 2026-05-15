@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { OpenAIChatMessage, OpenAIChatRole, OpenAIFunctionToolDef, OpenAIToolCall } from "./types";
-import { sanitizeFunctionName, isValidToolName } from "./tool_names";
+import { isValidToolName } from "./tool_names";
 
 // Tool calling sanitization helpers
 
@@ -191,25 +191,23 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
 		return {};
 	}
 
-	// Reject illegal tool names upfront. If we let `sanitizeFunctionName`
-	// rewrite a name like `weather.get` → `weather_get`, the model returns
-	// `weather_get`, but VS Code's host registry only knows the original —
-	// the tool call would silently route to nowhere. Refusing the request
-	// with a clear message is better than a silent black hole. For legal
-	// names (matching /^[\w-]+$/), sanitizeFunctionName below is a no-op
-	// and acts as defense in depth.
+	// Reject names that don't match DeepSeek's spec
+	// (^[A-Za-z0-9_-]{1,64}$). Sending a name like `weather.get` would
+	// previously have been silently rewritten to `weather_get`; the
+	// model's echoed tool_call would not match VS Code's host registry
+	// and the call would route nowhere. Refusing the request upfront
+	// with a clear message is better than a silent black hole.
 	validateTools(tools);
 
 	const toolDefs: OpenAIFunctionToolDef[] = tools
 		.filter((t) => t && typeof t === "object")
 		.map((t) => {
-			const name = sanitizeFunctionName(t.name);
 			const description = typeof t.description === "string" ? t.description : "";
 			const params = sanitizeSchema(t.inputSchema ?? { type: "object", properties: {} });
 			return {
 				type: "function" as const,
 				function: {
-					name,
+					name: t.name,
 					description,
 					parameters: params,
 				},
@@ -222,30 +220,29 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
             console.error("[DeepSeek V4] ToolMode.Required but multiple tools:", tools.length);
             throw new Error("LanguageModelChatToolMode.Required is not supported with more than one tool");
 		}
-		tool_choice = { type: "function", function: { name: sanitizeFunctionName(tools[0].name) } };
+		tool_choice = { type: "function", function: { name: tools[0].name } };
 	}
 
 	return { tools: toolDefs, tool_choice };
 }
 
 /**
- * Validate tool names against the strict predicate `isValidToolName`.
- * Throws synchronously on the first illegal name; the error message shows
- * the original input and what sanitization would have rewritten it to,
- * so the user (or upstream tool author) can see exactly what to fix.
+ * Validate tool names against the OpenAI/DeepSeek function-name spec.
+ * Throws synchronously on the first illegal name with a message
+ * showing exactly which characters or length constraint failed, so
+ * the user (or upstream tool author) can see what to fix.
  *
  * @param tools Tools to validate.
  */
 export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): void {
 	for (const tool of tools) {
 		if (!isValidToolName(tool.name)) {
-            const sanitized = sanitizeFunctionName(tool.name);
-            console.error("[DeepSeek V4] Invalid tool name detected:", { name: tool.name, sanitizedTo: sanitized });
+            console.error("[DeepSeek V4] Invalid tool name detected:", { name: tool.name });
             throw new Error(
                 `Invalid tool name "${tool.name}": DeepSeek requires names matching ` +
-                `/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ with no consecutive underscores. ` +
-                `Would be rewritten to "${sanitized}" — the model's echo would then ` +
-                `not match VS Code's tool registry, routing the call nowhere.`
+                `/^[A-Za-z0-9_-]{1,64}$/ — letters, digits, underscores or dashes, ` +
+                `length 1 to 64. The model's echoed tool name must match what we ` +
+                `send, so we cannot silently rewrite it.`
             );
 		}
 	}

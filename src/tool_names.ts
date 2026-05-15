@@ -1,39 +1,24 @@
 /**
- * Tool-name sanitization and validation. Pure (zero vscode dependency)
- * so unit tests can import it via Node ESM without a VS Code mock.
+ * Tool-name validation against the OpenAI / DeepSeek function-name spec:
  *
- * DeepSeek's OpenAI-compatible tool-call protocol echoes the tool name
- * back verbatim in the streaming response. If we ever rewrite a name
- * before sending it (e.g. `weather.get` → `weather_get`), the echo
- * won't match VS Code's host tool registry and the call routes nowhere.
+ *   "Must be a-z, A-Z, 0-9, or contain underscores and dashes, with a
+ *    maximum length of 64."
  *
- * `sanitizeFunctionName` produces a name that satisfies DeepSeek's
- * naming rules; `isValidToolName` returns true iff sanitization is a
- * no-op on the input, which is the strict pre-condition we enforce at
- * the API boundary in `validateTools`.
+ * Pure (zero vscode dependency) so unit tests can import it via Node ESM
+ * without a VS Code mock.
+ *
+ * Earlier revisions of this file carried a `sanitizeFunctionName` helper
+ * that added two over-defensive rules on top of the official spec —
+ * forcing the first character to be a letter, and collapsing consecutive
+ * underscores — both inherited from an upstream fork. When we tightened
+ * `validateTools` to use that helper as an oracle, the result rejected
+ * names like `1tool`, `_private`, and `foo__bar` that DeepSeek itself
+ * accepts. We now anchor directly on the spec instead. See
+ * https://api-docs.deepseek.com/api/create-chat-completion (tools.function.name).
  */
 
-export function sanitizeFunctionName(name: unknown): string {
-	if (typeof name !== "string" || !name) {
-		return "tool";
-	}
-	let sanitized = name.replace(/[^a-zA-Z0-9_-]/g, "_");
-	if (!/^[a-zA-Z]/.test(sanitized)) {
-		sanitized = `tool_${sanitized}`;
-	}
-	sanitized = sanitized.replace(/_+/g, "_");
-	return sanitized.slice(0, 64);
-}
+const TOOL_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-/**
- * A tool name is valid iff `sanitizeFunctionName` is a no-op on it. This
- * catches every case where the prior weaker regex (`^[\w-]+$`) would let
- * a name through but `sanitizeFunctionName` would still rewrite it, e.g.:
- *   - leading digit `1tool` → `tool_1tool`
- *   - leading underscore `_private` → `tool_private`
- *   - consecutive underscores `foo__bar` → `foo_bar`
- *   - length > 64 → truncated
- */
 export function isValidToolName(name: unknown): boolean {
-	return typeof name === "string" && name.length > 0 && sanitizeFunctionName(name) === name;
+	return typeof name === "string" && TOOL_NAME_RE.test(name);
 }
