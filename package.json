@@ -72,6 +72,14 @@
 			{
 				"command": "deepseekv4.clearReasoningCache",
 				"title": "Clear DeepSeek V4 Reasoning Cache"
+			},
+			{
+				"command": "deepseekv4.showContextWindow",
+				"title": "DeepSeek V4: Show Context Window Details"
+			},
+			{
+				"command": "deepseekv4.compactCopilotChat",
+				"title": "DeepSeek V4: Compact Copilot Chat"
 			}
 		],
 		"configuration": {

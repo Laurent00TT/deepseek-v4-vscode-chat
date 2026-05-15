@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [released]
 
+## [Unreleased]
+
+### Added
+
+- **`DeepSeek V4: Show Context Window Details` command.** Opens a
+  QuickPick listing the current `ContextUsageSnapshot`: model variant,
+  used / window tokens with percentage, budget split (input vs output),
+  API-reported prompt / cache-hit / cache-miss / completion / reasoning
+  token counts, local pre-request estimate, and a "last update" age.
+  A warning row appears at ≥ 70% usage. Selecting the final
+  `Compact Copilot Chat` item invokes the bridge command below.
+- **`DeepSeek V4: Compact Copilot Chat` command.** Detects whether
+  `github.copilot.chat.compact` is registered (so a freshly-installed
+  Copilot Chat works without an extension reload). If present, runs
+  Copilot's compaction flow; if absent, surfaces a single information
+  message. Does **not** touch DeepSeek-owned state (reasoning cache,
+  balance baseline, etc.) — wording reflects this explicitly.
+- **Tooltip "Context Details" link.** The status-bar tooltip now ends
+  with a `$(graph) Context Details` link next to the existing
+  `View full log` link, so users can jump from the quick glance into
+  the full QuickPick.
+- **`src/context_usage.ts` + `src/context_usage_service.ts`** — shared
+  source of truth for the latest snapshot. Pure helpers (vscode-free)
+  live in `context_usage.ts`; the stateful wrapper with
+  `vscode.EventEmitter` lives in `context_usage_service.ts`, matching
+  the pattern already used for `cache_breakdown.ts` and `tool_names.ts`.
+- **`test/unit_context_usage.mjs`** — 26 assertions covering the four
+  invariants from the design doc: estimate vs API authority, model-switch
+  invalidation, clear-state recovery, and the breadcrumb case.
+
+### Documentation
+
+- `docs/CONTEXT_WINDOW_INTEGRATION.md` — design rationale for the new
+  feature, including the verified reason VS Code's native
+  `chat/contextUsage/actions` menu cannot be a contribution target
+  (proposed API, Marketplace-incompatible).
+
 ## [0.3.7] - 2026-05-12
 
 ### Added

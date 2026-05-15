@@ -14,6 +14,7 @@ import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
+import { ContextUsageService } from "./context_usage_service";
 
 const REASONING_CACHE_STATE_KEY = "deepseekv4.reasoningCache";
 
@@ -445,6 +446,12 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	private _peakCacheHitRate?: number;
 	private _lastCacheWarnTime?: number;
 
+	/** Shared context-usage state. Written by `provideLanguageModelChatResponse`
+	 * (estimate before request, API values after), read by the status-bar
+	 * tooltip's "Open Details" link and by the `DeepSeek Context Details`
+	 * QuickPick command. Public so extension.ts can subscribe / read. */
+	public readonly contextUsage = new ContextUsageService();
+
 	/** Cached balance snapshot. Refreshed manually (refresh link) or
 	 * automatically (debounced after each chat completion, silent mode). */
 	private _balance: BalanceInfo | undefined;
@@ -512,6 +519,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					this._balance = undefined;
 					this._sessionStartBalance = undefined;
 					this._sessionRequestCount = 0;
+					this.contextUsage.clear("secret-change");
 					this.refreshStatusBar();
 					// Kick off a silent refresh to (a) re-establish the session
 					// baseline against the new account, and (b) populate the
@@ -709,7 +717,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		md.appendMarkdown(
 			`**Reasoning effort** &nbsp; \`${currentEffort}\` &nbsp; [$(gear) configure](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)\n\n`,
 		);
-		md.appendMarkdown("[View full log](command:deepseekv4.showLog)");
+		md.appendMarkdown("[$(graph) Context Details](command:deepseekv4.showContextWindow) &nbsp;·&nbsp; [View full log](command:deepseekv4.showLog)");
 
 		return md;
 	}
@@ -737,6 +745,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		this._peakCacheHitRate = undefined;
 		// Intentionally NOT resetting _lastCacheWarnTime — if a breakdown
 		// fired 30s ago, a manual clearSession shouldn't unmute the throttle.
+		this.contextUsage.clear("session-clear");
 		this.refreshStatusBar();
 		this.log("session.clear", { startBalance: this._sessionStartBalance });
 	}
@@ -964,6 +973,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		}
 		this._subscriptions.length = 0;
 		this._onDidChangeChatInfoEmitter.dispose();
+		this.contextUsage.dispose();
 		// statusBar is owned by extension.ts (added to context.subscriptions);
 		// VS Code disposes it on extension deactivate. We don't touch it here.
 	}
@@ -1192,6 +1202,18 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             const inputTokenCount = Math.ceil(messageChars / this._charsPerToken);
             const toolTokenCount = Math.ceil(toolChars / this._charsPerToken);
             const tokenLimit = Math.max(1, model.maxInputTokens);
+            // Publish a pre-request estimate so the QuickPick (and any
+            // other reader) has something to show even if the request
+            // fails before the SSE final usage chunk arrives.
+            this.contextUsage.updateEstimate({
+                modelId: variant.id,
+                modelDisplayName: variant.displayName,
+                thinking: variant.thinking,
+                maxInputTokens: variant.maxInputTokens,
+                maxOutputTokens: variant.maxOutputTokens,
+                estimatedPromptTokens: inputTokenCount,
+                estimatedToolTokens: toolTokenCount,
+            });
             if (inputTokenCount + toolTokenCount > tokenLimit) {
                 const estimated = inputTokenCount + toolTokenCount;
                 console.error("[DeepSeek V4] Message exceeds token limit", { total: estimated, tokenLimit });
@@ -1321,6 +1343,21 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				}
 				this._lastCacheHitTokens = cacheHit;
 				this._lastModelMaxInputTokens = variant.maxInputTokens;
+				// Publish authoritative API values to the shared snapshot.
+				// `usage.prompt_cache_miss_tokens` is computed defensively
+				// here too in case the server omits it (older API behaviour).
+				this.contextUsage.updateFromApi({
+					modelId: variant.id,
+					modelDisplayName: variant.displayName,
+					thinking: variant.thinking,
+					maxInputTokens: variant.maxInputTokens,
+					maxOutputTokens: variant.maxOutputTokens,
+					apiPromptTokens: promptTotal,
+					apiCompletionTokens: usage.completion_tokens ?? 0,
+					apiCacheHitTokens: cacheHit,
+					apiCacheMissTokens: usage.prompt_cache_miss_tokens ?? Math.max(0, promptTotal - cacheHit),
+					apiReasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+				});
 				const currHitRate = promptTotal > 0 ? cacheHit / promptTotal : 0;
 				this._lastCacheHitRate = currHitRate;
 				this._peakCacheHitRate = Math.max(this._peakCacheHitRate ?? 0, currHitRate);
