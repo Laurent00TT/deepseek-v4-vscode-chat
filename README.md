@@ -69,7 +69,7 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | Setting | Values | Default | Description |
 | ------ | ------ | ------ | ------ |
 | `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for `(thinking)` model variants. `high` is faster with shorter reasoning chains; `max` is the deepest setting. No effect on non-thinking variants. Picked up at request time. |
-| `deepseekv4.showContextUsage` | `boolean` | `true` | Show the live context-window usage percentage (e.g. `45.3%`) inline in the status bar. The percentage is colour-tiered by pressure: **sky blue** under 50%, **amber** 50–80%, **red** at or above 80%. Disable to hide the percentage entirely. |
+| `deepseekv4.showContextUsage` | `boolean` | `true` | Show the live context-window usage percentage (e.g. `45.3%`) inline in the status bar, in the standard description-foreground color. Disable to hide the percentage entirely. Pressure warnings at 70%/90% are surfaced in the tooltip and via the action dialog when the request actually hits the 400 context-overflow error. |
 | `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream the raw `reasoning_content` to the OutputChannel. Useful for debugging prompt-cache breakdowns but may capture private code/paths/intermediate state — keep **off** when sharing logs in bug reports. |
 
 ## License

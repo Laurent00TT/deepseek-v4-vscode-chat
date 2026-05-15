@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Context-usage indicator in status bar.** Live `X.X%` of the context window used, tiered by pressure: sky blue under 50%, amber 50–80%, red at or above 80%. Tooltip shows a Current / Messages / Tools breakdown plus a Cap explanation (`1M − 384K reserved for thinking chain`).
+- **Context-usage indicator in status bar.** Live `X.X%` of the context window used, rendered in the standard description-foreground color (the percentage segment was deliberately kept inside the main DS V4 status item rather than split into a tier-coloured second item, after a brief experiment let other extensions like Python's "No Environment" slot in between and break visual cohesion). Tooltip shows a Current / Messages / Tools breakdown plus a Cap explanation (`1M − 384K reserved for thinking chain`).
 - **`Clear DeepSeek V4 Reasoning Cache` command** for scrubbing private state from globalState before sharing logs or switching projects. Awaits a hard `globalState.update` flush before reporting success, so a reload immediately after clearing cannot restore stale reasoning.
 - **`deepseekv4.showContextUsage` setting** to toggle the status-bar percentage indicator.
 - **`deepseekv4.logRawReasoning` setting** (default `false`) gates streaming of raw `reasoning_content` to the OutputChannel. Previously the channel captured every reasoning byte unconditionally, which could leak private code, paths, or intermediate state into bug-report logs.
