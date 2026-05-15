@@ -788,10 +788,25 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * reasoning could leak business context cross-project; user simply hit a
 	 * persistent 400 chain and wants a clean slate.
 	 */
-	public clearReasoningCache(): void {
+	public async clearReasoningCache(): Promise<void> {
 		const before = this._reasoningCache.size();
 		this._reasoningCache.clear();
-		this.log("reasoning_cache.clear", { entriesRemoved: before });
+		// Cancel any pending debounced write — we're doing a force-flush
+		// below that supersedes it. Without this, the cache.clear() above
+		// would schedule a new 200ms persist via onChange that races our
+		// own awaited update().
+		if (this._persistTimer) {
+			clearTimeout(this._persistTimer);
+			this._persistTimer = undefined;
+		}
+		// Force-flush the empty state BEFORE notifying the user. The
+		// command's whole purpose is privacy (scrub before sharing a
+		// log, etc.); if the user reloads between our notification and
+		// the debounced write, the old reasoning could be restored from
+		// globalState. Awaiting turns the success message into a real
+		// success rather than a wishful one.
+		await this.globalState.update(REASONING_CACHE_STATE_KEY, []);
+		this.log("reasoning_cache.clear", { entriesRemoved: before, persisted: true });
 		vscode.window.showInformationMessage(
 			`Cleared ${before} reasoning cache entr${before === 1 ? "y" : "ies"}.`,
 		);
@@ -965,8 +980,16 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			this._balanceRefreshTimer = undefined;
 		}
 		if (this._persistTimer) {
+			// A pending debounced write was about to flush the latest
+			// cache state. Cancelling the timer without flushing means
+			// the state on disk could be up to 200ms stale — including,
+			// crucially, an empty state produced by `clearReasoningCache`
+			// that hasn't been written yet. Fire-and-forget the write
+			// here; VS Code typically keeps the extension host alive
+			// briefly during dispose, so the write usually completes.
 			clearTimeout(this._persistTimer);
 			this._persistTimer = undefined;
+			void this.globalState.update(REASONING_CACHE_STATE_KEY, this._reasoningCache.serialize());
 		}
 		for (const sub of this._subscriptions) {
 			try { sub.dispose(); } catch { /* ignore */ }
