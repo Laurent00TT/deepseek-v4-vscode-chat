@@ -28,6 +28,9 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      - name: Unit tests
+        run: npm test
+
       - name: vsce package (sanity check)
         run: npx @vscode/vsce package -o /tmp/extension.vsix
 

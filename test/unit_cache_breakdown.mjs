@@ -1,37 +1,18 @@
 // Truth-table test for shouldWarnCacheBreakdown causal-chain logic.
 //
-// The real function lives in src/provider.ts and is module-private — we
-// inline its definition here so this test stays standalone (no API key,
-// no VS Code, no compile step). If the real implementation drifts, this
-// test will silently pass against the inlined copy — keep the two in sync.
+// Imports the REAL implementation from compiled `out/cache_breakdown.js`
+// rather than inlining a copy. This means the test will fail if anyone
+// drifts the implementation away from the documented behaviour — no
+// silent passing on stale inline copies.
 //
-//     node test/unit_cache_breakdown.mjs
+//     npm run compile && node test/unit_cache_breakdown.mjs
+//
+// `npm test` runs `npm run compile` automatically via the pretest hook.
 //
 // Exits 0 on all-pass, 1 on any failure.
 
 import process from "node:process";
-
-// === INLINED FROM provider.ts — keep in sync ===
-function shouldWarnCacheBreakdown(
-	currHitRate,
-	peakHitRate,
-	reasoningMissesThisTurn,
-	lastWarnTime,
-) {
-	if (lastWarnTime && Date.now() - lastWarnTime < 5 * 60_000) {
-		return false;
-	}
-	if (reasoningMissesThisTurn === 0) {
-		return false;
-	}
-	if (peakHitRate < 0.70) {
-		return false;
-	}
-	if (currHitRate > 0.20) {
-		return false;
-	}
-	return true;
-}
+import { shouldWarnCacheBreakdown } from "../out/cache_breakdown.js";
 
 const now = Date.now();
 const FRESH = undefined;

@@ -149,6 +149,7 @@
 		"package": "vsce package",
 		"publish": "vsce publish",
 		"prepare-icon": "node scripts/prepare-icon.mjs",
+		"pretest": "npm run compile",
 		"test": "npm run test:unit",
 		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_tool_name_validation.mjs"
 	},

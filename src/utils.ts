@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { OpenAIChatMessage, OpenAIChatRole, OpenAIFunctionToolDef, OpenAIToolCall } from "./types";
+import { sanitizeFunctionName, isValidToolName } from "./tool_names";
 
 // Tool calling sanitization helpers
 
@@ -24,35 +25,9 @@ function isIntegerLikePropertyName(propertyName: string | undefined): boolean {
     return integerMarkers.some((m) => lowered.includes(m)) || lowered.endsWith("_id");
 }
 
-export function sanitizeFunctionName(name: unknown): string {
-    if (typeof name !== "string" || !name){
-		return "tool";
-	}
-    let sanitized = name.replace(/[^a-zA-Z0-9_-]/g, "_");
-    if (!/^[a-zA-Z]/.test(sanitized)) {
-        sanitized = `tool_${sanitized}`;
-    }
-    sanitized = sanitized.replace(/_+/g, "_");
-    return sanitized.slice(0, 64);
-}
-
-/**
- * A tool name is valid iff `sanitizeFunctionName` is a no-op on it. This
- * catches every case where the prior weaker regex (`^[\w-]+$`) would let
- * a name through but `sanitizeFunctionName` would still rewrite it, e.g.:
- *   - leading digit `1tool` → `tool_1tool`
- *   - leading underscore `_private` → `tool_private`
- *   - consecutive underscores `foo__bar` → `foo_bar`
- *   - length > 64 → truncated
- * The OpenAI tool-call protocol echoes the tool name back verbatim; if we
- * rewrote it on the way out, the model's echo wouldn't match VS Code's
- * host registry and the tool call would silently route nowhere.
- *
- * Pure (no vscode dependency) so the unit test can import it directly.
- */
-export function isValidToolName(name: unknown): boolean {
-    return typeof name === "string" && name.length > 0 && sanitizeFunctionName(name) === name;
-}
+// `sanitizeFunctionName` and `isValidToolName` moved to `./tool_names.ts`
+// (pure, vscode-free) so unit tests can import them via Node ESM without
+// a VS Code mock. Re-imported above for in-file usage.
 
 function pruneUnknownSchemaKeywords(schema: unknown): Record<string, unknown> {
     if (!schema || typeof schema !== "object" || Array.isArray(schema)){

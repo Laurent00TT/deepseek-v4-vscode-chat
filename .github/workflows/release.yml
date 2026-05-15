@@ -35,6 +35,7 @@ jobs:
       - run: npm ci
       - run: npm run compile
       - run: npm run lint
+      - run: npm test
 
       - name: Package VSIX
         run: npx @vscode/vsce package -o extension.vsix

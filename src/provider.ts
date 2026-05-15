@@ -13,6 +13,7 @@ import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
+import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 
 const REASONING_CACHE_STATE_KEY = "deepseekv4.reasoningCache";
 
@@ -253,39 +254,6 @@ async function showContextOverflowGuidance(detail: string): Promise<void> {
 	} else if (choice === "Show Log") {
 		void vscode.commands.executeCommand("deepseekv4.showLog");
 	}
-}
-
-/**
- * Detect breakdown of DeepSeek's server-side prompt cache caused by local
- * reasoning_cache misses. Causal chain: reasoning_cache miss → empty
- * reasoning_content stub → broken prefix → server prompt cache collapses.
- *
- * We deliberately gate on `reasoningMissesThisTurn > 0` rather than raw
- * hit-rate delta — model switches, tool list changes, and host history
- * trim all legitimately drop the hit rate but aren't actionable bugs and
- * shouldn't pop a warning. The peakHitRate gate excludes users whose
- * cache never worked in the first place (e.g. they keep mutating the
- * system prompt) — that's a different problem.
- */
-function shouldWarnCacheBreakdown(
-	currHitRate: number,
-	peakHitRate: number,
-	reasoningMissesThisTurn: number,
-	lastWarnTime: number | undefined,
-): boolean {
-	if (lastWarnTime && Date.now() - lastWarnTime < 5 * 60_000) {
-		return false;
-	}
-	if (reasoningMissesThisTurn === 0) {
-		return false;
-	}
-	if (peakHitRate < 0.70) {
-		return false;
-	}
-	if (currHitRate > 0.20) {
-		return false;
-	}
-	return true;
 }
 
 function formatTokenK(tokens: number): string {
