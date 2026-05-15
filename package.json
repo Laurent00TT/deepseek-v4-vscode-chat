@@ -150,7 +150,7 @@
 		"publish": "vsce publish",
 		"prepare-icon": "node scripts/prepare-icon.mjs",
 		"test": "npm run test:unit",
-		"test:unit": "node test/unit_cache_breakdown.mjs"
+		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_tool_name_validation.mjs"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",

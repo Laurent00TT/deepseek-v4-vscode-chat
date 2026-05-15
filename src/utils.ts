@@ -24,7 +24,7 @@ function isIntegerLikePropertyName(propertyName: string | undefined): boolean {
     return integerMarkers.some((m) => lowered.includes(m)) || lowered.endsWith("_id");
 }
 
-function sanitizeFunctionName(name: unknown): string {
+export function sanitizeFunctionName(name: unknown): string {
     if (typeof name !== "string" || !name){
 		return "tool";
 	}
@@ -34,6 +34,24 @@ function sanitizeFunctionName(name: unknown): string {
     }
     sanitized = sanitized.replace(/_+/g, "_");
     return sanitized.slice(0, 64);
+}
+
+/**
+ * A tool name is valid iff `sanitizeFunctionName` is a no-op on it. This
+ * catches every case where the prior weaker regex (`^[\w-]+$`) would let
+ * a name through but `sanitizeFunctionName` would still rewrite it, e.g.:
+ *   - leading digit `1tool` → `tool_1tool`
+ *   - leading underscore `_private` → `tool_private`
+ *   - consecutive underscores `foo__bar` → `foo_bar`
+ *   - length > 64 → truncated
+ * The OpenAI tool-call protocol echoes the tool name back verbatim; if we
+ * rewrote it on the way out, the model's echo wouldn't match VS Code's
+ * host registry and the tool call would silently route nowhere.
+ *
+ * Pure (no vscode dependency) so the unit test can import it directly.
+ */
+export function isValidToolName(name: unknown): boolean {
+    return typeof name === "string" && name.length > 0 && sanitizeFunctionName(name) === name;
 }
 
 function pruneUnknownSchemaKeywords(schema: unknown): Record<string, unknown> {
@@ -236,15 +254,23 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
 }
 
 /**
- * Validate tool names to ensure they contain only word chars, hyphens, or underscores.
+ * Validate tool names against the strict predicate `isValidToolName`.
+ * Throws synchronously on the first illegal name; the error message shows
+ * the original input and what sanitization would have rewritten it to,
+ * so the user (or upstream tool author) can see exactly what to fix.
+ *
  * @param tools Tools to validate.
  */
 export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): void {
 	for (const tool of tools) {
-		if (!tool.name.match(/^[\w-]+$/)) {
-            console.error("[DeepSeek V4] Invalid tool name detected:", tool.name);
+		if (!isValidToolName(tool.name)) {
+            const sanitized = sanitizeFunctionName(tool.name);
+            console.error("[DeepSeek V4] Invalid tool name detected:", { name: tool.name, sanitizedTo: sanitized });
             throw new Error(
-                `Invalid tool name "${tool.name}": only alphanumeric characters, hyphens, and underscores are allowed.`
+                `Invalid tool name "${tool.name}": DeepSeek requires names matching ` +
+                `/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ with no consecutive underscores. ` +
+                `Would be rewritten to "${sanitized}" — the model's echo would then ` +
+                `not match VS Code's tool registry, routing the call nowhere.`
             );
 		}
 	}
