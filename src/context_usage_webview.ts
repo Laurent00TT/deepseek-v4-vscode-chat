@@ -161,31 +161,42 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 			const totalWindow = snap.maxInputTokens + snap.maxOutputTokens;
 			const used = snap.usedTokens;
 			const reservedOutput = snap.maxOutputTokens;
-			const usedPct = (used / totalWindow) * 100;
+			// Bar widths use total-window denominator (visual reflects how the
+			// 1M window is partitioned). Header percentage uses input-budget
+			// denominator (actionable: "how much of my prompt budget is used").
+			// Two denominators, two different questions.
+			const usedPctOfBar = (used / totalWindow) * 100;
 			const reservedPct = (reservedOutput / totalWindow) * 100;
-			const remainingPct = Math.max(0, 100 - usedPct - reservedPct);
-			const totalPctStr = usedPct.toFixed(1) + '%';
+			const remainingPct = Math.max(0, 100 - usedPctOfBar - reservedPct);
+			const inputPct = snap.maxInputTokens > 0 ? (used / snap.maxInputTokens) * 100 : 0;
+			const inputPctStr = inputPct.toFixed(1) + '%';
+			const reservedShare = totalWindow > 0 ? (reservedOutput / totalWindow * 100).toFixed(0) : '0';
 
 			const nodes = [];
 
-			// Header: tokens & percentage
+			// Header: "X / Y input · NN.N%" — denominator is input budget
+			// so the percentage tells the user how full their prompt budget
+			// is, not how much of the structurally-allocated window they've
+			// consumed (the reserved 384K isn't theirs to fill).
 			nodes.push(h('div', { class: 'usage-header' },
 				h('div', { class: 'usage-tokens' },
-					fmtK(used) + ' / ' + fmtK(totalWindow) + ' tokens'),
-				h('div', { class: 'usage-percent' }, totalPctStr),
+					fmtK(used) + ' / ' + fmtK(snap.maxInputTokens) + ' input'),
+				h('div', { class: 'usage-percent' }, inputPctStr),
 			));
 
-			// Progress bar (three flex children)
+			// Progress bar (three flex children, widths over TOTAL window)
 			nodes.push(h('div', { class: 'progress-bar' },
-				h('div', { class: 'filled', style: 'width:' + usedPct + '%' }),
+				h('div', { class: 'filled', style: 'width:' + usedPctOfBar + '%' }),
 				h('div', { style: 'width:' + remainingPct + '%' }),
 				h('div', { class: 'reserved', style: 'width:' + reservedPct + '%' }),
 			));
 
-			// Reserved-for-response legend
+			// Reserved-for-response legend — calls out the share-of-window
+			// percentage so the user understands the bar's striped chunk is
+			// structural, not "another flavor of used".
 			nodes.push(h('div', { class: 'reserved-legend' },
 				h('span', { class: 'reserved-swatch' }),
-				h('span', null, 'Reserved for response (' + fmtK(reservedOutput) + ')'),
+				h('span', null, 'Reserved for response (' + fmtK(reservedOutput) + ' · ' + reservedShare + '% of window)'),
 			));
 
 			// Model section

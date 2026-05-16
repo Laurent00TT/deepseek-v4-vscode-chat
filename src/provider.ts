@@ -609,26 +609,30 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	/**
-	 * Percentage of the FULL context window used (input + reserved output),
-	 * matching the denominator the native VS Code chat-context widget uses
-	 * and the value shown in the tooltip + webview. Prior versions divided
-	 * by maxInputTokens alone, which produced a status-bar percentage that
-	 * disagreed with the tooltip (e.g. 4.1% on status bar vs 2.6% in
-	 * tooltip for the same snapshot — confusing).
+	 * Percentage of the INPUT BUDGET used. Denominator is `maxInputTokens`
+	 * (the prompt-token ceiling), NOT the full context window.
+	 *
+	 * Why not total window: thinking variants reserve 384K for the response,
+	 * which is 37.5% of the 1M total. Dividing by total dilutes the signal —
+	 * a "60% used" reading actually means input is already saturated (614K of
+	 * 640K input budget consumed), but users naturally read 60% as "still
+	 * 40% headroom". The reserved chunk is structural, not consumable, so
+	 * including it in the denominator is misleading.
+	 *
+	 * The progress bar visual in the tooltip / webview still depicts the
+	 * full window (used + remaining input + reserved-output stripe) because
+	 * the bar answers a different question — "where am I in the total
+	 * window" — while this percentage answers "how full is my prompt budget".
 	 *
 	 * Sourced from the ContextUsageService snapshot so all three surfaces
-	 * (status bar, tooltip, webview) compute it the same way.
+	 * (status bar, tooltip, webview header) compute it the same way.
 	 */
 	private contextUsagePct(): number | undefined {
 		const snap = this.contextUsage.getSnapshot();
-		if (!snap) {
+		if (!snap || snap.maxInputTokens <= 0) {
 			return undefined;
 		}
-		const total = snap.maxInputTokens + snap.maxOutputTokens;
-		if (total <= 0) {
-			return undefined;
-		}
-		return snap.usedTokens / total;
+		return snap.usedTokens / snap.maxInputTokens;
 	}
 
 	/** Compute session spend from balance diff. Returns undefined until we
@@ -742,19 +746,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			const remainingCells = barWidth - usedCells - reservedCells;
 			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells) + "▒".repeat(reservedCells);
 			md.appendMarkdown("**Context Window**\n\n");
-			// Header row: tokens · percentage · Compact action, all inline.
-			// Putting the action next to the metric it acts on (rather than
-			// orphaning it at the bottom) makes the affordance discoverable
-			// at the same eye-fixation as the percentage that tells you
-			// whether you need it. ` · ` separators visually group the three
-			// pieces of information without a heavy divider.
+			// Header row: tokens / INPUT budget · percentage · Compact action.
+			// Denominator is maxInputTokens (not the full 1M window) so the
+			// percentage is actionable — see contextUsagePct() rationale.
+			// The progress bar below still visualises used + remaining input
+			// + reserved-output stripe over the full window, which is why the
+			// reserved share appears in the legend.
 			md.appendMarkdown(
-				`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(totalWindow)} tokens` +
+				`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(maxInput)} input` +
 				` &nbsp;·&nbsp; **${totalPctStr}%**` +
 				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
 			);
 			md.appendCodeblock(bar, "");
-			md.appendMarkdown(`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} reserved)\n\n`);
+			const reservedShare = totalWindow > 0 ? ((maxOutput / totalWindow) * 100).toFixed(0) : "0";
+			md.appendMarkdown(
+				`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} · ${reservedShare}% of window)\n\n`,
+			);
 
 			// Breakdown (estimate-only — server reports the combined
 			// prompt_tokens but not how those split between system /
