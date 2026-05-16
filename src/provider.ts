@@ -762,6 +762,27 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			md.appendMarkdown(
 				`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} · ${reservedShare}% of window)\n\n`,
 			);
+			// Last response: actual completion tokens server-reported (from
+			// the SSE final usage chunk). Surface it next to the reserved
+			// budget so users can see how much of that 384K was actually
+			// used — usually orders of magnitude less, which is useful
+			// information ("I'm reserving more headroom than I ever need").
+			// Split as `reasoning + visible` when the model reports both,
+			// so users can tell whether output cost was reasoning chain
+			// or visible reply.
+			const lastCompletion = snap.apiCompletionTokens;
+			if (lastCompletion !== undefined && lastCompletion > 0) {
+				const lastReasoning = snap.apiReasoningTokens;
+				const usedOfReserved = ((lastCompletion / maxOutput) * 100).toFixed(1);
+				let detail = "";
+				if (lastReasoning !== undefined && lastReasoning > 0) {
+					const visible = Math.max(0, lastCompletion - lastReasoning);
+					detail = ` &nbsp; _${lastReasoning.toLocaleString()} reasoning + ${visible.toLocaleString()} visible_`;
+				}
+				md.appendMarkdown(
+					`\`▶\` &nbsp; Last response: ${lastCompletion.toLocaleString()} tokens (${usedOfReserved}% of reserved)${detail}\n\n`,
+				);
+			}
 
 			// Breakdown (estimate-only — server reports the combined
 			// prompt_tokens but not how those split between system /
