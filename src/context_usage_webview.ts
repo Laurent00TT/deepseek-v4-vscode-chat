@@ -105,7 +105,10 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 		let snapshot = ${initialSnapshot};
 
 		function fmtK(n) {
-			if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + 'M';
+			if (n >= 1024 * 1024) {
+				const m = n / (1024 * 1024);
+				return Number.isInteger(m) ? m + 'M' : m.toFixed(1) + 'M';
+			}
 			return (n / 1024).toFixed(1) + 'K';
 		}
 		function fmtNum(n) {

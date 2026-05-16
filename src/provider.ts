@@ -258,6 +258,13 @@ async function showContextOverflowGuidance(detail: string): Promise<void> {
 }
 
 function formatTokenK(tokens: number): string {
+	// Auto-pick K vs M unit. K for sub-megatoken counts; M for the
+	// 1M+ window total. Whole-megatoken numbers (e.g. 1024 * 1024)
+	// drop the ".0" suffix so "1M" reads cleaner than "1.0M".
+	if (tokens >= 1024 * 1024) {
+		const m = tokens / (1024 * 1024);
+		return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
+	}
 	return `${(tokens / 1024).toFixed(1)}K`;
 }
 
