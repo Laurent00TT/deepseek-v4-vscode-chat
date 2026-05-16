@@ -25,6 +25,7 @@
  */
 
 import * as vscode from "vscode";
+import { randomBytes } from "node:crypto";
 import type { ContextUsageSnapshot } from "./context_usage";
 import type { ContextUsageService } from "./context_usage_service";
 
@@ -457,11 +458,17 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 </html>`;
 }
 
+/**
+ * Cryptographically random 32-char base64-url nonce for the inline
+ * <script> CSP allow-list. The CSP spec requires nonces be drawn from
+ * a cryptographically strong RNG to defeat attackers guessing values.
+ *
+ * Practical XSS risk here is already ~0 because every dynamic value
+ * is rendered via createElement + textContent (no innerHTML), but
+ * using `Math.random()` violated the spec letter — a future revision
+ * that adds an innerHTML path would inherit a predictable nonce as a
+ * latent hole. Closing this now keeps the defense-in-depth honest.
+ */
 function createNonce(): string {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-	let out = "";
-	for (let i = 0; i < 32; i++) {
-		out += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-	}
-	return out;
+	return randomBytes(24).toString("base64url");
 }
