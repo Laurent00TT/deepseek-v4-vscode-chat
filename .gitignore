@@ -8,6 +8,11 @@ node_modules/
 # Test artifacts
 .vscode-test/
 
+# Ad-hoc integration probes — kept out of version control because they
+# require a real DEEPSEEK_API_KEY and re-running them isn't part of any
+# routine workflow. Recreate locally as needed.
+test/integration_context_usage.mjs
+
 # Packaged extension
 *.vsix
 
