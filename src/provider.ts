@@ -258,14 +258,21 @@ async function showContextOverflowGuidance(detail: string): Promise<void> {
 }
 
 function formatTokenK(tokens: number): string {
-	// Auto-pick K vs M unit. K for sub-megatoken counts; M for the
-	// 1M+ window total. Whole-megatoken numbers (e.g. 1024 * 1024)
-	// drop the ".0" suffix so "1M" reads cleaner than "1.0M".
-	if (tokens >= 1024 * 1024) {
-		const m = tokens / (1024 * 1024);
-		return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
+	// Auto-pick K vs M unit using SI (base-1000), matching how LLM APIs
+	// report and price tokens ("$X / 1M tokens"). The previous base-1024
+	// (KiB) convention was inherited from byte-formatting templates and
+	// caused a confusing mismatch with raw token counts elsewhere in the
+	// UI — e.g. header showing "106.8K" while the Prompt-tokens row
+	// showed "109,067" for the same value.
+	//
+	// The ".0" trim keeps near-integer megatoken counts clean ("1M" not
+	// "1.0M") since model windows are typically marketed in round
+	// megatokens even when the precise sum (e.g. 1,048,576) isn't.
+	if (tokens >= 1_000_000) {
+		const s = (tokens / 1_000_000).toFixed(1);
+		return s.endsWith(".0") ? `${s.slice(0, -2)}M` : `${s}M`;
 	}
-	return `${(tokens / 1024).toFixed(1)}K`;
+	return `${(tokens / 1000).toFixed(1)}K`;
 }
 
 /**
@@ -794,12 +801,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			}
 		}
 
-		// Cache hit-rate row — derived from the snapshot.
+		// Cache hit-rate row — derived from the snapshot. Uses the same
+		// SI-K formatting as the tooltip header so the cached value
+		// visually matches the prompt-token row.
 		if (snap?.apiPromptTokens !== undefined && snap.apiPromptTokens > 0 && snap.apiCacheHitTokens !== undefined) {
 			const hitRate = snap.apiCacheHitTokens / snap.apiPromptTokens;
 			const hitPctStr = (hitRate * 100).toFixed(1);
-			const hitK = (snap.apiCacheHitTokens / 1024).toFixed(1);
-			md.appendMarkdown(`**Cache hit (last turn)** &nbsp; ${hitPctStr}% (${hitK}K cached)\n\n`);
+			md.appendMarkdown(`**Cache hit (last turn)** &nbsp; ${hitPctStr}% (${formatTokenK(snap.apiCacheHitTokens)} cached)\n\n`);
 		}
 
 		md.appendMarkdown("---\n\n");
@@ -1338,7 +1346,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                 // (an error in the chat panel plus the actionable popup) — they
                 // can dismiss whichever they want.
                 void showContextOverflowGuidance(
-                    `Estimated ${(estimated / 1024).toFixed(0)}K input tokens exceeds the ${(tokenLimit / 1024).toFixed(0)}K limit for ${model.name}.`,
+                    `Estimated ${(estimated / 1000).toFixed(0)}K input tokens exceeds the ${(tokenLimit / 1000).toFixed(0)}K limit for ${model.name}.`,
                 );
                 throw new Error("Message exceeds token limit.");
             }

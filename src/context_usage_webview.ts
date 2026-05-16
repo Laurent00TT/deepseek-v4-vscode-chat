@@ -120,12 +120,15 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 		const vscode = acquireVsCodeApi();
 		let snapshot = ${initialSnapshot};
 
+		// Match provider.ts:formatTokenK — SI base-1000 so token
+		// counts here line up with the raw Prompt/Completion values
+		// rendered as 'N,NNN' in the Last API response section.
 		function fmtK(n) {
-			if (n >= 1024 * 1024) {
-				const m = n / (1024 * 1024);
-				return Number.isInteger(m) ? m + 'M' : m.toFixed(1) + 'M';
+			if (n >= 1_000_000) {
+				const s = (n / 1_000_000).toFixed(1);
+				return s.endsWith('.0') ? s.slice(0, -2) + 'M' : s + 'M';
 			}
-			return (n / 1024).toFixed(1) + 'K';
+			return (n / 1000).toFixed(1) + 'K';
 		}
 		function fmtNum(n) {
 			return Number(n).toLocaleString();
