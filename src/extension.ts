@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { DeepSeekV4ChatModelProvider } from "./provider";
-import { showContextUsageWebview } from "./context_usage_webview";
+import { showContextUsageWebview, disposeContextUsageWebview } from "./context_usage_webview";
 
 const EXT_ID = "deepseek-community.deepseek-v4-vscode-chat";
 const SECRET_KEY = "deepseekv4.apiKey";
@@ -78,6 +78,11 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.lm.registerLanguageModelChatProvider(VENDOR, provider),
 		{ dispose: () => provider.dispose() },
+		// Ensure the singleton Context-Window webview tears down during
+		// deactivate even if VS Code's implicit per-extension cleanup
+		// changes behaviour in a future release. Idempotent — no-op when
+		// the panel is already closed.
+		{ dispose: () => disposeContextUsageWebview() },
 	);
 
 	context.subscriptions.push(

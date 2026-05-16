@@ -34,6 +34,21 @@ const VIEW_TYPE = "deepseekv4.contextWindow";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 
+/**
+ * Force-dispose the currently-open webview panel, if any. Intended to
+ * be hooked into the extension's `context.subscriptions` so the panel
+ * is guaranteed to tear down during extension deactivation — without
+ * relying on VS Code's implicit per-extension webview cleanup.
+ *
+ * Safe to call repeatedly: panel.dispose() is idempotent, and
+ * onDidDispose (registered in showContextUsageWebview) clears
+ * currentPanel anyway. Calling when nothing is open is a no-op.
+ */
+export function disposeContextUsageWebview(): void {
+	currentPanel?.dispose();
+	currentPanel = undefined;
+}
+
 export function showContextUsageWebview(
 	service: ContextUsageService,
 	output: vscode.OutputChannel,
