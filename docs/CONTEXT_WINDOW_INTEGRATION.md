@@ -81,31 +81,46 @@ Keep the current status-bar percentage. It is the fastest-glance
 surface, works without Copilot, and already covers the `< 70%`,
 `70-90%`, `> 90%` pressure cases textually in its tooltip.
 
-### 2. Command-palette entry: `DeepSeek Context Details`
+### 2. Command-palette entry: `Show DeepSeek V4 Context Window`
 
-A QuickPick (not a webview) opened from a new command
-`deepseekv4.showContextWindow`. It lists the latest
-`ContextUsageSnapshot` as a vertical key/value list:
+A **webview panel** opened from `deepseekv4.showContextWindow`. The
+original draft of this doc said QuickPick, but during implementation
+the user asked for "1:1 visual parity with Copilot's native
+ChatContextUsageDetails popup" (thin progress bar with striped
+reserved region, outlined Compact Conversation button, sectioned
+breakdown). QuickPick can render label / description / detail strings
+only — no progress bar pixels, no styled buttons. Webview wins on
+visual fidelity at the cost of a CSS file's worth of code.
 
-- model variant (e.g. `deepseek-v4-pro::thinking`)
-- context window (`prompt + completion / total`)
-- API-reported tokens (`prompt_tokens`, `prompt_cache_hit_tokens`,
-  `prompt_cache_miss_tokens`, `completion_tokens`,
-  `reasoning_tokens` if thinking)
-- used percentage
-- last-update time
-- warning row if percentage ≥ 70%
+The webview renders the latest `ContextUsageSnapshot`:
 
-QuickPick chosen over webview because:
+- header: `X.X K / Y.Y K total · NN.N%` with the percentage right-aligned
+- 2-segment progress bar (used + remaining) over the 1M shared window
+- "Next response: up to 384K (max_tokens cap)" caption (no longer a
+  striped bar segment — the reserved chunk represents the NEXT turn's
+  max_tokens slot, painting it as a third segment of "current usage"
+  was the visual confusion that drove this design)
+- "Last response: N tokens · M reasoning + L visible" row when
+  apiCompletionTokens is set
+- Breakdown rows for messages / tools (estimate-derived from server
+  prompt_tokens × local char-ratio split)
+- Stale `updatedAt` row
+- Outlined `Compact Conversation` button
 
-- Native VS Code widget, no CSS / theming work.
-- Zero new bundle weight.
-- No CSP, no message passing, no security surface.
-- Tooltip already covers ~80% of these data points; the QuickPick is
-  for the moment the user wants to drill deeper.
+Implementation rules:
 
-Webview can be revisited if and when we genuinely outgrow QuickPick —
-not before.
+- Use only VS Code CSS variables (`var(--vscode-progressBar-background)`,
+  `var(--vscode-button-border)`, etc.) — no hex colors. Theme
+  adaptation is free.
+- Render via `createElement` + `textContent`. Never `innerHTML`-with-
+  interpolation, so there is no XSS surface even though all data is
+  extension-controlled.
+- CSP `script-src 'nonce-...'`; nonce generated via `randomBytes` from
+  `node:crypto`, not `Math.random()`.
+- Single panel per workspace via a module-level `currentPanel`
+  variable; subsequent calls `reveal()` the existing panel. Explicit
+  `disposeContextUsageWebview()` hook pushed into
+  `context.subscriptions` for deactivate cleanup.
 
 ### 3. Compact bridge: `Compact Copilot Chat` command
 
@@ -121,9 +136,9 @@ Wording in command title and message must make clear that this invokes
 **Copilot's** compaction. It does not touch our reasoning cache,
 balance-anchor, or any DeepSeek-owned state.
 
-The same command can be surfaced inside the QuickPick from #2 as a
-secondary action item, so users who get to the details view can act on
-overflow without leaving it.
+Surfaced inside the webview from #2 as the prominent outlined button,
+and inside the status-bar tooltip as a markdown link, so users who get
+to either surface can act on overflow without leaving.
 
 ## Data model
 
@@ -135,8 +150,10 @@ interface ContextUsageSnapshot {
     maxInputTokens: number;
     maxOutputTokens: number;
 
-    // Local estimate (always available, even before first response).
-    estimatedPromptTokens: number;
+    // Local estimate buckets (always available, even before first response).
+    // Renamed from estimatedPromptTokens to make clear it's messages-only;
+    // server's prompt_tokens covers both messages AND tool definitions.
+    estimatedMessageTokens: number;
     estimatedToolTokens: number;
 
     // Authoritative API-reported values (undefined before the first
@@ -147,12 +164,19 @@ interface ContextUsageSnapshot {
     apiCacheMissTokens?: number;
     apiReasoningTokens?: number;
 
-    // Convenience derived fields.
-    usedTokens: number;            // prefer API value, fall back to estimate
-    percentage: number;            // usedTokens / (maxInputTokens + maxOutputTokens)
+    // Convenience derived field: prefers apiPromptTokens, falls back to
+    // (estimatedMessageTokens + estimatedToolTokens) so the fallback total
+    // is comparable to the API's prompt_tokens.
+    usedTokens: number;
     updatedAt: number;
 }
 ```
+
+Note: an earlier draft of this doc carried a `percentage` field on the
+snapshot. It was never consumed by any UI surface (all three readers —
+status bar, tooltip header, webview header — computed their own
+percentage from `(usedTokens + apiCompletionTokens) / totalWindow`)
+and was dropped during review #2.
 
 `apiPromptTokens` is what we surface as authoritative. Local estimates
 are only shown when no API data exists yet (first turn of a session).
@@ -198,44 +222,58 @@ during the initial migration.
 
 ### 3. Register two commands in `src/extension.ts`
 
-- `deepseekv4.showContextWindow` → opens the QuickPick
+- `deepseekv4.showContextWindow` → opens the webview
 - `deepseekv4.compactCopilotChat` → bridge to Copilot's compact
 
-### 4. Update tooltip
+Also push `{ dispose: disposeContextUsageWebview }` into
+`context.subscriptions` so the singleton panel tears down explicitly
+on extension deactivate (rather than relying on VS Code's implicit
+per-extension webview cleanup).
 
-`buildTooltip` already reads `_lastPromptTokens` etc. Add a single
-"Open Details" action link at the bottom that invokes
-`deepseekv4.showContextWindow`. This connects the quick-glance
-tooltip to the deep-dive QuickPick without users needing to discover
-the command in the palette.
+### 4. Wire the tooltip to the same snapshot
+
+`buildTooltip` reads everything from `contextUsage.getSnapshot()` —
+no parallel `_lastPromptTokens / _lastMessageTokens / _lastToolTokens`
+provider fields. Earlier revisions mirrored snapshot data into those
+fields and read them back here; the two-writer pattern was a drift
+hazard and review #6 removed it. Provider keeps only cross-turn
+state that isn't in the snapshot:
+
+- `_peakCacheHitRate` — running max for cache-breakdown detection
+- `_lastCacheWarnTime` — throttle for breakdown warnings
+- `_contextNudgeFired` — one-shot per session 95% nudge
+
+Tooltip also surfaces a `Context Details` link near the bottom that
+runs `deepseekv4.showContextWindow`, connecting the quick-glance
+tooltip to the deep-dive webview.
 
 ### 5. Update CHANGELOG
 
 A new `[Unreleased]` entry covering: new commands, new context-usage
-service, tooltip "Open Details" link. No version bump in this PR —
+service, tooltip "Context Details" link. No version bump in this PR —
 version bumps when we cut a release tag.
 
 ### Explicitly not in this plan
 
 - No new contribution to `chat/contextUsage/actions` (proposed API).
-- No webview.
 - No new tokenizer dependency.
 - No DeepSeek-owned conversation compaction.
 - No re-introduction of per-tier status-bar tinting.
 
 ## Error handling
 
-- **No request has run yet.** QuickPick shows the model's static budget
-  (`maxInputTokens + maxOutputTokens`) and "No data yet — send a
-  message to populate."
-- **API key missing.** QuickPick still works; balance/usage rows simply
-  show "—". Sending a message will surface the existing API-key
-  walkthrough.
+- **No request has run yet.** Webview shows an empty-state row
+  ("No data yet — send a chat message to populate context usage")
+  plus the Compact Conversation button.
+- **API key missing.** Webview still opens; data rows simply show
+  the static budget. Sending a message will surface the existing
+  API-key walkthrough.
 - **Copilot not installed.** `compactCopilotChat` returns a
   single-button information message. No throw, no error popup.
 - **DeepSeek omits final usage chunk** (server bug, observed once during
-  V4 GA). The snapshot retains the last good API values; the QuickPick
-  marks `updatedAt` as stale.
+  V4 GA). The snapshot retains the last good API values; the webview
+  shows the stale `updatedAt` ("Last update: Xm ago") so the user can
+  tell.
 - **User switches model variant mid-session.** Snapshot is cleared on
   `secrets.onDidChange` and on `clearSession`. The next request
   re-anchors.
@@ -249,10 +287,14 @@ the OutputChannel, and never block a request.
 ### Unit (Node ESM, `npm test`)
 
 - `context_usage.updateFromApi` overrides estimate
-- `percentage` calculation against `(maxInputTokens + maxOutputTokens)`
+- `updateEstimate` fallback sums messages + tools (regression for
+  review #1, where the old fallback used messages-only and
+  under-counted by ~5-15%)
 - `clear` resets to undefined
 - snapshot survives `updateEstimate` after `updateFromApi`
   (estimate must not clobber more authoritative API values)
+- model-variant switch invalidates both prior estimate and prior
+  API data
 
 These follow the established pattern of `unit_cache_breakdown.mjs` and
 `unit_tool_name_validation.mjs`: pure helpers exported from a vscode-free
@@ -260,11 +302,15 @@ module, tests `import` from `out/*.js`.
 
 ### Manual smoke
 
-- Run `DeepSeek Context Details` before any chat — QuickPick renders.
-- Run after a chat — values match the OutputChannel `[usage]` log.
+- Run `Show DeepSeek V4 Context Window` before any chat — webview
+  renders empty-state row plus Compact button.
+- Run after a chat — header tokens / percentage / "Last response"
+  row match the OutputChannel `[usage]` log.
 - Switch model variant, observe snapshot reset.
 - Install / uninstall Copilot Chat, observe `Compact Copilot Chat`
   branches correctly.
+- Fill context past 95% — single warning toast appears, dismissing
+  it does not re-fire until usage drops below 80%.
 
 ## Risks
 
