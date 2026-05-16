@@ -664,37 +664,44 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 
 		md.appendMarkdown("---\n\n");
 
-		// Context-usage row. Only emitted once we've seen a real prompt_tokens
-		// number from the API — before that, we can't meaningfully compare.
+		// Context-usage block, styled after VS Code 1.120's native
+		// ChatContextUsageDetails panel (the "Context Window" popup with
+		// the progress bar + striped reserved region + Compact Conversation
+		// button). MarkdownString can't render real CSS progress bars, so
+		// the bar is a unicode-block approximation inside a code block to
+		// force monospace alignment.
 		const pct = this.contextUsagePct();
-		if (this.showContextUsage() && pct !== undefined && this._lastPromptTokens && this._lastModelMaxInputTokens) {
-			const maxTokens = this._lastModelMaxInputTokens;
-			const pctStr = (pct * 100).toFixed(1);
-			md.appendMarkdown("**Context Usage**\n\n");
-			md.appendMarkdown(`- Current: ${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(maxTokens)} tokens (${pctStr}%)\n`);
-			if (this._lastMessageTokens !== undefined) {
-				const msgPct = ((this._lastMessageTokens / maxTokens) * 100).toFixed(1);
-				md.appendMarkdown(`- Messages: ~${formatTokenK(this._lastMessageTokens)} (${msgPct}%)\n`);
+		const snap = this.contextUsage.getSnapshot();
+		if (this.showContextUsage() && pct !== undefined && this._lastPromptTokens && this._lastModelMaxInputTokens && snap) {
+			const maxInput = this._lastModelMaxInputTokens;
+			const maxOutput = snap.maxOutputTokens;
+			const totalWindow = maxInput + maxOutput;
+			const totalPctStr = ((this._lastPromptTokens / totalWindow) * 100).toFixed(1);
+			// Bar: used (█) + remaining input (░) + reserved output (▒).
+			// 40 chars wide — close to the actual rendered width in
+			// MarkdownString code blocks without overflowing the popup.
+			const barWidth = 40;
+			const usedCells = Math.min(barWidth, Math.round((this._lastPromptTokens / totalWindow) * barWidth));
+			const reservedCells = Math.min(barWidth - usedCells, Math.round((maxOutput / totalWindow) * barWidth));
+			const remainingCells = barWidth - usedCells - reservedCells;
+			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells) + "▒".repeat(reservedCells);
+			md.appendMarkdown("**Context Window**\n\n");
+			md.appendMarkdown(`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(totalWindow)} tokens &nbsp;&nbsp;&nbsp; **${totalPctStr}%**\n\n`);
+			md.appendCodeblock(bar, "");
+			md.appendMarkdown(`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} reserved)\n\n`);
+
+			// Breakdown (estimate-only — server reports the combined
+			// prompt_tokens but not how those split between system /
+			// tools / messages, so we use the local char-ratio split).
+			if (this._lastMessageTokens !== undefined && this._lastToolTokens !== undefined) {
+				md.appendMarkdown("**Breakdown** &nbsp; _(local estimate)_\n\n");
+				const msgPct = ((this._lastMessageTokens / totalWindow) * 100).toFixed(1);
+				const toolPct = ((this._lastToolTokens / totalWindow) * 100).toFixed(1);
+				md.appendMarkdown(`Messages &nbsp;&nbsp; ~${msgPct}%  \n`);
+				md.appendMarkdown(`Tools &nbsp;&nbsp; ~${toolPct}%\n\n`);
 			}
-			if (this._lastToolTokens !== undefined) {
-				const toolPct = ((this._lastToolTokens / maxTokens) * 100).toFixed(1);
-				md.appendMarkdown(`- Tools: ~${formatTokenK(this._lastToolTokens)} (${toolPct}%)\n`);
-			}
-			md.appendMarkdown("\n");
-			// Explain where the input cap comes from. V4's 1M is shared
-			// between input and output, so thinking variants (which reserve
-			// 384K for the reasoning chain) get less input headroom than
-			// non-thinking variants. Heuristic on _lastModelMaxInputTokens
-			// avoids needing to remember which variant the last request used.
-			if (this._lastModelMaxInputTokens && this._lastModelMaxInputTokens < 700_000) {
-				md.appendMarkdown(
-					`_Cap = 1M − 384K reserved for thinking chain. Non-thinking variants get 960K input._\n\n`,
-				);
-			}
-			// `~` prefix on Messages/Tools above signals these are estimates
-			// (server returns only the combined prompt_tokens; the
-			// messages-vs-tools split is derived from local char counts).
-			md.appendMarkdown(`_~ = estimated (only the total is server-reported)_\n\n`);
+
+			md.appendMarkdown("[$(history) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n");
 		}
 
 		// Cache hit-rate row. Surfaces the cheap-vs-expensive token ratio so
