@@ -490,6 +490,12 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	private _peakCacheHitRate?: number;
 	private _lastCacheWarnTime?: number;
 
+	/** Tracks whether the 95% context-window nudge has already fired
+	 * this session. Auto-resets when usage drops below 80% (i.e. user
+	 * compacted or started new chat) so the next fill-up re-arms it.
+	 * Manually reset by clearSession / secret-change. */
+	private _contextNudgeFired = false;
+
 	/** Shared context-usage state. Written by `provideLanguageModelChatResponse`
 	 * (estimate before request, API values after), read by the status-bar
 	 * tooltip's "Open Details" link and by the `DeepSeek Context Details`
@@ -563,6 +569,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					this._balance = undefined;
 					this._sessionStartBalance = undefined;
 					this._sessionRequestCount = 0;
+					this._contextNudgeFired = false;
 					this.contextUsage.clear("secret-change");
 					this.refreshStatusBar();
 					// Kick off a silent refresh to (a) re-establish the session
@@ -853,6 +860,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		this._lastModelMaxInputTokens = undefined;
 		this._lastCacheHitRate = undefined;
 		this._peakCacheHitRate = undefined;
+		this._contextNudgeFired = false;
 		// Intentionally NOT resetting _lastCacheWarnTime — if a breakdown
 		// fired 30s ago, a manual clearSession shouldn't unmute the throttle.
 		this.contextUsage.clear("session-clear");
@@ -922,6 +930,31 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			void vscode.commands.executeCommand("workbench.action.chat.newChat");
 		} else if (choice === "Show Cache Stats") {
 			void vscode.commands.executeCommand("deepseekv4.showCacheStats");
+		}
+	}
+
+	/**
+	 * Single-shot nudge when the 1M shared context window crosses 95%.
+	 * Offers the user two actionable paths (Compact / Show Details) and
+	 * a passive Dismiss. Re-arms automatically when usage drops below
+	 * 80% (handled in the usage handler — see _contextNudgeFired).
+	 *
+	 * Why warning-level not info-level: at 95% the user is one
+	 * non-trivial turn away from a context-overflow 400 error. A
+	 * yellow toast is the right urgency.
+	 */
+	private async nudgeContextNearLimit(pct: number): Promise<void> {
+		const pctStr = (pct * 100).toFixed(0);
+		this.log("context.nudge.fired", { ctxPct: pct.toFixed(3) });
+		const choice = await vscode.window.showWarningMessage(
+			`DeepSeek context window at ${pctStr}% — approaching the 1M limit. Compact the conversation to free space?`,
+			"Compact Conversation",
+			"Show Details",
+		);
+		if (choice === "Compact Conversation") {
+			void vscode.commands.executeCommand("deepseekv4.compactCopilotChat");
+		} else if (choice === "Show Details") {
+			void vscode.commands.executeCommand("deepseekv4.showContextWindow");
 		}
 	}
 
@@ -1484,6 +1517,21 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				) {
 					this._lastCacheWarnTime = Date.now();
 					void this.warnCacheBreakdown(currHitRate, this._peakCacheHitRate, reasoningStats.misses);
+				}
+
+				// Context-window nudge at 95%. Fires once per session; auto-rearms
+				// when usage drops below 80% (i.e. after the user compacts or
+				// clears the conversation). Hysteresis gap (95→80) prevents
+				// re-firing on small fluctuations around the threshold.
+				const ctxPct = this.contextUsagePct();
+				if (ctxPct !== undefined) {
+					if (ctxPct < 0.80 && this._contextNudgeFired) {
+						this._contextNudgeFired = false;
+						this.log("context.nudge.rearmed", { ctxPct: ctxPct.toFixed(3) });
+					} else if (ctxPct >= 0.95 && !this._contextNudgeFired) {
+						this._contextNudgeFired = true;
+						void this.nudgeContextNearLimit(ctxPct);
+					}
 				}
 
 				this.log("usage", {
