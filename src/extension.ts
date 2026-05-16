@@ -239,7 +239,11 @@ async function showContextWindowQuickPick(
 		const fmtK = (n: number) => `${(n / 1024).toFixed(1)}K`;
 		items.push({
 			label: "Model",
-			description: `${snap.modelDisplayName}${snap.thinking ? "  ·  thinking" : ""}`,
+			// `modelDisplayName` already encodes thinking vs non-thinking
+			// (e.g. "DeepSeek V4 Pro (thinking)"), so we don't append a
+			// separate "· thinking" suffix — that produced visible
+			// duplication like "Pro (thinking) · thinking".
+			description: snap.modelDisplayName,
 		});
 		items.push({
 			label: "Used / Window",
