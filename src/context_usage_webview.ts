@@ -158,37 +158,47 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 		}
 
 		function buildUsage(snap) {
+			const totalWindow = snap.maxInputTokens + snap.maxOutputTokens;
 			const used = snap.usedTokens;
 			const reservedOutput = snap.maxOutputTokens;
-			// Bar denominator: maxInputTokens (NOT full window). Output
-			// budget is a SEPARATE server-enforced ceiling, not a third
-			// segment of one continuous bar — painting it that way
-			// implied "reserved 占用 input 空间", which misleads visually.
-			// Output info goes into a text row below the bar.
+			// Bar denominator: 1M total window (SHARED pool). Server
+			// enforces prompt_tokens + completion_tokens ≤ 1M, and our
+			// request's max_tokens=384K reserves a slice of that 1M
+			// pool for output — the reserved stripe in the bar correctly
+			// shows the 384K consuming its share of the same 1M space
+			// that prompt fills from. Header percentage stays at the
+			// input-budget denominator (5%-style), which is actionable
+			// for "how full is my prompt headroom".
+			const usedPctOfBar = (used / totalWindow) * 100;
+			const reservedPct = (reservedOutput / totalWindow) * 100;
+			const remainingPct = Math.max(0, 100 - usedPctOfBar - reservedPct);
 			const inputPct = snap.maxInputTokens > 0 ? (used / snap.maxInputTokens) * 100 : 0;
-			const remainingInputPct = Math.max(0, 100 - inputPct);
 			const inputPctStr = inputPct.toFixed(1) + '%';
+			const reservedShare = totalWindow > 0 ? (reservedOutput / totalWindow * 100).toFixed(0) : '0';
 
 			const nodes = [];
 
-			// Header: "X / Y input · NN.N%"
+			// Header: "X / Y input · NN.N%" — Y is maxInputTokens (= 1M − max_tokens reserved).
 			nodes.push(h('div', { class: 'usage-header' },
 				h('div', { class: 'usage-tokens' },
 					fmtK(used) + ' / ' + fmtK(snap.maxInputTokens) + ' input'),
 				h('div', { class: 'usage-percent' }, inputPctStr),
 			));
 
-			// Progress bar — input-only, 2-segment
+			// Progress bar — 3-segment over the 1M shared pool
 			nodes.push(h('div', { class: 'progress-bar' },
-				h('div', { class: 'filled', style: 'width:' + inputPct + '%' }),
-				h('div', { style: 'width:' + remainingInputPct + '%' }),
+				h('div', { class: 'filled', style: 'width:' + usedPctOfBar + '%' }),
+				h('div', { style: 'width:' + remainingPct + '%' }),
+				h('div', { class: 'reserved', style: 'width:' + reservedPct + '%' }),
 			));
 
-			// Output budget — separate server-enforced ceiling. Plain text,
-			// no bar segment, because input and output are independent
-			// dimensions, not a single shared resource.
+			// Reserved-for-response legend — explicit about the shared
+			// pool framing so users understand the stripe is not a
+			// separate ceiling, it's just where our request's max_tokens
+			// = 384K sits inside the 1M window.
 			nodes.push(h('div', { class: 'reserved-legend' },
-				h('span', null, 'Output budget: ' + fmtK(reservedOutput) + ' (separate, server-enforced)'),
+				h('span', { class: 'reserved-swatch' }),
+				h('span', null, 'Reserved for response (' + fmtK(reservedOutput) + ' · ' + reservedShare + '% of the 1M shared window)'),
 			));
 
 			// Model section

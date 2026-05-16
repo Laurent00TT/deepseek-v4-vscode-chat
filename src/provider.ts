@@ -737,18 +737,23 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// updated denominator — reuse it instead of recomputing, so a future
 			// change to the percentage definition only needs to happen in one place.
 			const totalPctStr = (pct * 100).toFixed(1);
-			// Bar: 2-segment, used (█) + remaining (░), denominator =
-			// maxInputTokens (NOT the full 1M window). Output budget is a
-			// SEPARATE server-enforced ceiling — it shares the 1M window
-			// but it's an independent dimension, not a continuous resource
-			// that competes with prompt for the same pool. Painting it as
-			// a third stripe in this bar implied "reserved 占用 input 空间",
-			// which misleads visually (38% of bar was structural, not used).
-			// Surface output budget below as text instead.
+			// Bar: 3-segment, denominator = totalWindow (1M).
+			//
+			// CORRECTNESS NOTE — the 1M context window is a SHARED pool:
+			// prompt_tokens + completion_tokens ≤ 1M (server-enforced).
+			// `max_tokens` in the request reserves output budget out of
+			// that pool, which is why prompt headroom = 1M − max_tokens
+			// = 616K when we set max_tokens=384K. The reserved stripe in
+			// the bar correctly reflects that the 384K is part of the
+			// same 1M, not a separate dimension. A prior revision tried
+			// to paint the bar as "input only" — that hid the true 1M
+			// allocation from view, made max_tokens look like an
+			// independent ceiling, and we've reverted.
 			const barWidth = 40;
-			const usedCells = Math.min(barWidth, Math.round((this._lastPromptTokens / maxInput) * barWidth));
-			const remainingCells = barWidth - usedCells;
-			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells);
+			const usedCells = Math.min(barWidth, Math.round((this._lastPromptTokens / totalWindow) * barWidth));
+			const reservedCells = Math.min(barWidth - usedCells, Math.round((maxOutput / totalWindow) * barWidth));
+			const remainingCells = barWidth - usedCells - reservedCells;
+			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells) + "▒".repeat(reservedCells);
 			md.appendMarkdown("**Context Window**\n\n");
 			md.appendMarkdown(
 				`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(maxInput)} input` +
@@ -756,12 +761,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
 			);
 			md.appendCodeblock(bar, "");
-			// Output budget: a separate server-enforced ceiling. Shown as
-			// plain text (not a bar segment) because it's a different
-			// dimension from the input fill — they share the 1M window but
-			// don't trade off against each other in real time.
+			const reservedShare = totalWindow > 0 ? ((maxOutput / totalWindow) * 100).toFixed(0) : "0";
 			md.appendMarkdown(
-				`_Output budget: ${formatTokenK(maxOutput)} &nbsp;·&nbsp; separate, server-enforced_\n\n`,
+				`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} · ${reservedShare}% of the 1M window — shared pool, not a separate ceiling)\n\n`,
 			);
 			// Last response: actual completion tokens server-reported (from
 			// the SSE final usage chunk). Pairs with the output budget line
