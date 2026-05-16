@@ -426,12 +426,14 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
     background-color: transparent;
     color: var(--vscode-foreground);
     border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, var(--vscode-foreground)));
-    border-radius: 2px;
-    padding: 6px 18px;
+    border-radius: 4px;
+    padding: 9px 16px;
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size);
     cursor: pointer;
-    min-width: 200px;
+    width: 100%;
+    max-width: 320px;
+    box-sizing: border-box;
   }
   button.compact-btn:hover {
     background-color: var(--vscode-list-hoverBackground);
