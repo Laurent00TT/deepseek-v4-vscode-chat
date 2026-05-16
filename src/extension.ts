@@ -221,7 +221,7 @@ async function showContextWindowQuickPick(
 ): Promise<void> {
 	const snap = provider.contextUsage.getSnapshot();
 	const qp = vscode.window.createQuickPick();
-	qp.title = "DeepSeek Context Window";
+	qp.title = "DeepSeek V4 Context Window";
 	qp.placeholder = "Select an action, or press Esc to close";
 	qp.matchOnDescription = false;
 	qp.matchOnDetail = false;

@@ -75,11 +75,11 @@
 			},
 			{
 				"command": "deepseekv4.showContextWindow",
-				"title": "DeepSeek V4: Show Context Window Details"
+				"title": "Show DeepSeek V4 Context Window"
 			},
 			{
 				"command": "deepseekv4.compactCopilotChat",
-				"title": "DeepSeek V4: Compact Copilot Chat"
+				"title": "Compact Copilot Chat"
 			}
 		],
 		"configuration": {
