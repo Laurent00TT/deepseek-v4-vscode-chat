@@ -757,7 +757,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				md.appendMarkdown(`Tools &nbsp;&nbsp; ~${toolPct}%\n\n`);
 			}
 
-			md.appendMarkdown("**[$(combine) Compact Conversation](command:deepseekv4.compactCopilotChat)**\n\n");
+			md.appendMarkdown("[$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n");
 		}
 
 		// Cache hit-rate row. Surfaces the cheap-vs-expensive token ratio so
