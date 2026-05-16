@@ -571,11 +571,27 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			.get<boolean>("showContextUsage", true);
 	}
 
+	/**
+	 * Percentage of the FULL context window used (input + reserved output),
+	 * matching the denominator the native VS Code chat-context widget uses
+	 * and the value shown in the tooltip + webview. Prior versions divided
+	 * by maxInputTokens alone, which produced a status-bar percentage that
+	 * disagreed with the tooltip (e.g. 4.1% on status bar vs 2.6% in
+	 * tooltip for the same snapshot — confusing).
+	 *
+	 * Sourced from the ContextUsageService snapshot so all three surfaces
+	 * (status bar, tooltip, webview) compute it the same way.
+	 */
 	private contextUsagePct(): number | undefined {
-		if (!this._lastPromptTokens || !this._lastModelMaxInputTokens) {
+		const snap = this.contextUsage.getSnapshot();
+		if (!snap) {
 			return undefined;
 		}
-		return this._lastPromptTokens / this._lastModelMaxInputTokens;
+		const total = snap.maxInputTokens + snap.maxOutputTokens;
+		if (total <= 0) {
+			return undefined;
+		}
+		return snap.usedTokens / total;
 	}
 
 	/** Compute session spend from balance diff. Returns undefined until we
@@ -676,7 +692,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			const maxInput = this._lastModelMaxInputTokens;
 			const maxOutput = snap.maxOutputTokens;
 			const totalWindow = maxInput + maxOutput;
-			const totalPctStr = ((this._lastPromptTokens / totalWindow) * 100).toFixed(1);
+			// `pct` is already over (input + output) thanks to contextUsagePct()'s
+			// updated denominator — reuse it instead of recomputing, so a future
+			// change to the percentage definition only needs to happen in one place.
+			const totalPctStr = (pct * 100).toFixed(1);
 			// Bar: used (█) + remaining input (░) + reserved output (▒).
 			// 40 chars wide — close to the actual rendered width in
 			// MarkdownString code blocks without overflowing the popup.
