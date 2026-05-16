@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { DeepSeekV4ChatModelProvider } from "./provider";
+import { showContextUsageWebview } from "./context_usage_webview";
 
 const EXT_ID = "deepseek-community.deepseek-v4-vscode-chat";
 const SECRET_KEY = "deepseekv4.apiKey";
@@ -84,7 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand(REFRESH_BALANCE_COMMAND, () => provider.refreshBalance()),
 		vscode.commands.registerCommand(CLEAR_SESSION_COMMAND, () => provider.clearSession()),
 		vscode.commands.registerCommand(CLEAR_REASONING_CACHE_COMMAND, () => provider.clearReasoningCache()),
-		vscode.commands.registerCommand(SHOW_CONTEXT_WINDOW_COMMAND, () => showContextWindowQuickPick(provider, outputChannel)),
+		vscode.commands.registerCommand(SHOW_CONTEXT_WINDOW_COMMAND, () => showContextUsageWebview(provider.contextUsage, outputChannel)),
 		vscode.commands.registerCommand(COMPACT_COPILOT_CHAT_COMMAND, () => bridgeCompactCopilotChat(outputChannel)),
 		vscode.commands.registerCommand(SHOW_CACHE_STATS_COMMAND, () => {
 			const stats = provider.getCacheStats();
@@ -203,108 +204,6 @@ async function showWelcomeIfNeeded(
 	} catch (e) {
 		output.appendLine(`[welcome] failed to open walkthrough: ${e instanceof Error ? e.message : String(e)}`);
 	}
-}
-
-/**
- * Render the current ContextUsageSnapshot as a non-interactive QuickPick.
- * Each row is a label/description key/value pair; the final row is an
- * actionable entry that, when selected, runs `compactCopilotChat`.
- *
- * Why QuickPick and not a webview: zero CSS/theming work, zero CSP
- * surface, zero new bundle weight. The tooltip already covers the
- * quick-glance case; this view is for the moment someone wants to
- * see all the numbers at once.
- */
-async function showContextWindowQuickPick(
-	provider: DeepSeekV4ChatModelProvider,
-	output: vscode.OutputChannel,
-): Promise<void> {
-	const snap = provider.contextUsage.getSnapshot();
-	const qp = vscode.window.createQuickPick();
-	qp.title = "DeepSeek V4 Context Window";
-	qp.placeholder = "Select an action, or press Esc to close";
-	qp.matchOnDescription = false;
-	qp.matchOnDetail = false;
-
-	const items: vscode.QuickPickItem[] = [];
-
-	if (!snap) {
-		items.push({
-			label: "$(info) No data yet",
-			description: "Send a message to populate context usage.",
-		});
-	} else {
-		const totalWindow = snap.maxInputTokens + snap.maxOutputTokens;
-		const pctStr = (snap.percentage * 100).toFixed(1);
-		const fmtK = (n: number) => `${(n / 1024).toFixed(1)}K`;
-		items.push({
-			label: "Model",
-			// `modelDisplayName` already encodes thinking vs non-thinking
-			// (e.g. "DeepSeek V4 Pro (thinking)"), so we don't append a
-			// separate "· thinking" suffix — that produced visible
-			// duplication like "Pro (thinking) · thinking".
-			description: snap.modelDisplayName,
-		});
-		items.push({
-			label: "Used / Window",
-			description: `${fmtK(snap.usedTokens)} / ${fmtK(totalWindow)} tokens  ·  ${pctStr}%`,
-		});
-		items.push({
-			label: "Budget split",
-			description: `input ${fmtK(snap.maxInputTokens)}  ·  output ${fmtK(snap.maxOutputTokens)}`,
-		});
-		if (snap.apiPromptTokens !== undefined) {
-			const hit = snap.apiCacheHitTokens ?? 0;
-			const miss = snap.apiCacheMissTokens ?? 0;
-			items.push({
-				label: "API: prompt tokens",
-				description: `${snap.apiPromptTokens.toLocaleString()}  (cache hit ${hit.toLocaleString()} · miss ${miss.toLocaleString()})`,
-			});
-			items.push({
-				label: "API: completion tokens",
-				description: `${(snap.apiCompletionTokens ?? 0).toLocaleString()}${snap.apiReasoningTokens !== undefined ? `  (reasoning ${snap.apiReasoningTokens.toLocaleString()})` : ""}`,
-			});
-		} else {
-			items.push({
-				label: "API: prompt tokens",
-				description: "— (no response yet; using estimate)",
-			});
-		}
-		items.push({
-			label: "Local estimate",
-			description: `prompt ~${snap.estimatedPromptTokens.toLocaleString()}  ·  tools ~${snap.estimatedToolTokens.toLocaleString()}`,
-		});
-		const ageSec = Math.round((Date.now() - snap.updatedAt) / 1000);
-		items.push({
-			label: "Last update",
-			description: ageSec < 60 ? `${ageSec}s ago` : `${Math.round(ageSec / 60)}m ago`,
-		});
-
-		if (snap.percentage >= 0.7) {
-			items.push({
-				label: `$(warning) Context window is ${pctStr}% full`,
-				description: "Consider starting a new chat or compacting.",
-			});
-		}
-	}
-
-	items.push({
-		label: "$(history) Compact Copilot Chat",
-		description: "Forward to Copilot's /compact (Copilot Chat required)",
-		alwaysShow: true,
-	});
-
-	qp.items = items;
-	qp.onDidAccept(() => {
-		const picked = qp.selectedItems[0];
-		qp.hide();
-		if (picked?.label.includes("Compact Copilot Chat")) {
-			void vscode.commands.executeCommand(COMPACT_COPILOT_CHAT_COMMAND);
-		}
-	});
-	qp.onDidHide(() => qp.dispose());
-	qp.show();
-	output.appendLine(`[context] details opened (snapshot ${snap ? "available" : "empty"})`);
 }
 
 /**

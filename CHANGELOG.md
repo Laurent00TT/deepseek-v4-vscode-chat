@@ -11,13 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **`DeepSeek V4: Show Context Window Details` command.** Opens a
-  QuickPick listing the current `ContextUsageSnapshot`: model variant,
-  used / window tokens with percentage, budget split (input vs output),
-  API-reported prompt / cache-hit / cache-miss / completion / reasoning
-  token counts, local pre-request estimate, and a "last update" age.
-  A warning row appears at ≥ 70% usage. Selecting the final
-  `Compact Copilot Chat` item invokes the bridge command below.
+- **`Show DeepSeek V4 Context Window` command.** Opens a webview that
+  1:1 re-creates the visual structure of VS Code 1.120's native
+  `ChatContextUsageDetails` popup: a "X.X K / Y.Y K tokens" header
+  with right-aligned percentage, a thin progress bar with a striped
+  "Reserved for response" segment, Model / Breakdown / Last API
+  response sections, a "Last update Xm ago" timestamp, and a
+  `Compact Conversation` button at the bottom. The webview uses only
+  VS Code theme CSS variables (no hex colors), so it adapts to light
+  / dark / high-contrast themes automatically, and it subscribes to
+  the context-usage service so the panel updates live as new requests
+  complete. Built with `createElement` / `textContent` rather than
+  `innerHTML` so the rendering path has no XSS surface.
 - **`DeepSeek V4: Compact Copilot Chat` command.** Detects whether
   `github.copilot.chat.compact` is registered (so a freshly-installed
   Copilot Chat works without an extension reload). If present, runs
