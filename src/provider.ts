@@ -471,22 +471,12 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	private _sessionStartBalance?: number;
 	private _sessionRequestCount = 0;
 
-	/** Token-usage snapshot from the most recent API response. Used to render
-	 * context-window utilisation in the status bar and tooltip. Updated after
-	 * every successful chat completion — undefined before the first response.
-	 * `_lastModelMaxInputTokens` is duplicated here because refreshStatusBar
-	 * runs without a model handle and needs both values to compute the %. */
-	private _lastPromptTokens?: number;
-	private _lastMessageTokens?: number;
-	private _lastToolTokens?: number;
-	private _lastCacheHitTokens?: number;
-	private _lastModelMaxInputTokens?: number;
-
-	/** Prompt-cache hit-rate tracking for the breakdown detector. A sudden
-	 * collapse here, combined with reasoning_cache misses on the same turn,
-	 * indicates the local cache failed and the server-side prompt-cache
-	 * prefix has broken — costing the user ~12× in mis-prefix tokens. */
-	private _lastCacheHitRate?: number;
+	/** Running maximum of prompt-cache hit-rate observed this session.
+	 * Persists across turns because the breakdown detector needs to know
+	 * "did this cache ever work?" — that question requires history.
+	 * Other per-turn token counts (prompt/completion/cache_hit/etc) are
+	 * read straight from `this.contextUsage.getSnapshot()`, so they don't
+	 * need duplicated provider fields. */
 	private _peakCacheHitRate?: number;
 	private _lastCacheWarnTime?: number;
 
@@ -745,26 +735,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		// button). MarkdownString can't render real CSS progress bars, so
 		// the bar is a unicode-block approximation inside a code block to
 		// force monospace alignment.
+		// Single source of truth: read everything from the snapshot. This
+		// replaces an older path that mirrored snapshot data into
+		// `_lastPromptTokens / _lastMessageTokens / _lastToolTokens /
+		// _lastCacheHitTokens / _lastModelMaxInputTokens / _lastCacheHitRate`
+		// provider fields and read them back here. Two writers (snapshot
+		// vs provider fields) updated in lock-step were a drift hazard;
+		// reading from the snapshot directly eliminates the duplication.
 		const pct = this.contextUsagePct();
 		const snap = this.contextUsage.getSnapshot();
-		if (this.showContextUsage() && pct !== undefined && this._lastPromptTokens && this._lastModelMaxInputTokens && snap) {
-			const maxInput = this._lastModelMaxInputTokens;
+		if (this.showContextUsage() && pct !== undefined && snap) {
+			const maxInput = snap.maxInputTokens;
 			const maxOutput = snap.maxOutputTokens;
 			const totalWindow = maxInput + maxOutput;
-			// `pct` is already over (input + output) thanks to contextUsagePct()'s
-			// updated denominator — reuse it instead of recomputing, so a future
-			// change to the percentage definition only needs to happen in one place.
 			const totalPctStr = (pct * 100).toFixed(1);
-			// Bar: 2-segment over the 1M shared window.
-			//   filled = single-turn footprint (prompt + last completion)
-			//   empty  = remaining window
-			// The reserved 384K is not painted as a separate segment — it
-			// would represent the NEXT turn's max_tokens slot rather than
-			// current usage, and mixing past-actual with future-reserved
-			// in the same bar was the visual confusion. Information about
-			// the next-turn max_tokens budget goes in a text row below.
 			const lastCompletion = snap.apiCompletionTokens ?? 0;
-			const turnFootprint = this._lastPromptTokens + lastCompletion;
+			const turnFootprint = snap.usedTokens + lastCompletion;
 			const barWidth = 40;
 			const usedCells = Math.min(barWidth, Math.round((turnFootprint / totalWindow) * barWidth));
 			const remainingCells = barWidth - usedCells;
@@ -776,50 +762,43 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
 			);
 			md.appendCodeblock(bar, "");
-			// Next-turn max_tokens cap — informational, not occupying bar space.
-			// Server will reserve this much output room out of the 1M pool on
-			// the next request, so prompt headroom on that next request is
-			// effectively (1M − this_value).
 			md.appendMarkdown(
 				`_Next response: up to ${formatTokenK(maxOutput)} (max_tokens cap)_\n\n`,
 			);
-			// Last response: actual completion tokens server-reported (from
-			// the SSE final usage chunk). Already incorporated into the
-			// header percentage above; this row breaks down "of that X%,
-			// how much was reasoning vs visible response" for the most
-			// recent turn.
-			const lastResponseTokens = snap.apiCompletionTokens;
-			if (lastResponseTokens !== undefined && lastResponseTokens > 0) {
+			if (lastCompletion > 0) {
 				const lastReasoning = snap.apiReasoningTokens;
-				const usedOfBudget = ((lastResponseTokens / maxOutput) * 100).toFixed(2);
+				const usedOfBudget = ((lastCompletion / maxOutput) * 100).toFixed(2);
 				let detail = "";
 				if (lastReasoning !== undefined && lastReasoning > 0) {
-					const visible = Math.max(0, lastResponseTokens - lastReasoning);
+					const visible = Math.max(0, lastCompletion - lastReasoning);
 					detail = ` &nbsp; _${lastReasoning.toLocaleString()} reasoning + ${visible.toLocaleString()} visible_`;
 				}
 				md.appendMarkdown(
-					`\`▶\` &nbsp; Last response: ${lastResponseTokens.toLocaleString()} tokens (${usedOfBudget}% of max_tokens)${detail}\n\n`,
+					`\`▶\` &nbsp; Last response: ${lastCompletion.toLocaleString()} tokens (${usedOfBudget}% of max_tokens)${detail}\n\n`,
 				);
 			}
 
-			// Breakdown (estimate-only — server reports the combined
-			// prompt_tokens but not how those split between system /
-			// tools / messages, so we use the local char-ratio split).
-			if (this._lastMessageTokens !== undefined && this._lastToolTokens !== undefined) {
+			// Breakdown — derive actual message/tool split from the local
+			// estimate ratios applied to the server-precise prompt total.
+			// Server reports a combined prompt_tokens; the split is
+			// estimate-derived hence the "(local estimate)" subtitle.
+			const msgEst = snap.estimatedMessageTokens;
+			const toolEst = snap.estimatedToolTokens;
+			const estTotal = msgEst + toolEst;
+			if (estTotal > 0 && snap.apiPromptTokens !== undefined) {
+				const msgActual = snap.apiPromptTokens * (msgEst / estTotal);
+				const toolActual = Math.max(0, snap.apiPromptTokens - msgActual);
 				md.appendMarkdown("**Breakdown** &nbsp; _(local estimate)_\n\n");
-				const msgPct = ((this._lastMessageTokens / totalWindow) * 100).toFixed(1);
-				const toolPct = ((this._lastToolTokens / totalWindow) * 100).toFixed(1);
-				md.appendMarkdown(`Messages &nbsp;&nbsp; ~${msgPct}%  \n`);
-				md.appendMarkdown(`Tools &nbsp;&nbsp; ~${toolPct}%\n\n`);
+				md.appendMarkdown(`Messages &nbsp;&nbsp; ~${(msgActual / totalWindow * 100).toFixed(1)}%  \n`);
+				md.appendMarkdown(`Tools &nbsp;&nbsp; ~${(toolActual / totalWindow * 100).toFixed(1)}%\n\n`);
 			}
 		}
 
-		// Cache hit-rate row. Surfaces the cheap-vs-expensive token ratio so
-		// users can spot when their prompt cache stops working without having
-		// to dig through the log.
-		if (this._lastCacheHitRate !== undefined) {
-			const hitPctStr = (this._lastCacheHitRate * 100).toFixed(1);
-			const hitK = ((this._lastCacheHitTokens ?? 0) / 1024).toFixed(1);
+		// Cache hit-rate row — derived from the snapshot.
+		if (snap?.apiPromptTokens !== undefined && snap.apiPromptTokens > 0 && snap.apiCacheHitTokens !== undefined) {
+			const hitRate = snap.apiCacheHitTokens / snap.apiPromptTokens;
+			const hitPctStr = (hitRate * 100).toFixed(1);
+			const hitK = (snap.apiCacheHitTokens / 1024).toFixed(1);
 			md.appendMarkdown(`**Cache hit (last turn)** &nbsp; ${hitPctStr}% (${hitK}K cached)\n\n`);
 		}
 
@@ -851,14 +830,8 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		// next observe a balance.
 		this._sessionStartBalance = this._balance?.totalBalance;
 		this._sessionRequestCount = 0;
-		// Reset the context-usage display so the next refresh shows a clean
-		// state until the first response of the new session lands.
-		this._lastPromptTokens = undefined;
-		this._lastMessageTokens = undefined;
-		this._lastToolTokens = undefined;
-		this._lastCacheHitTokens = undefined;
-		this._lastModelMaxInputTokens = undefined;
-		this._lastCacheHitRate = undefined;
+		// Reset cross-turn state; per-turn token counts are cleared via the
+		// contextUsage.clear() below (which wipes the snapshot).
 		this._peakCacheHitRate = undefined;
 		this._contextNudgeFired = false;
 		// Intentionally NOT resetting _lastCacheWarnTime — if a breakdown
@@ -1471,24 +1444,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				const cacheHit = usage.prompt_cache_hit_tokens ?? 0;
 				const cacheHitPct = promptTotal > 0 ? (cacheHit / promptTotal) * 100 : 0;
 
-				// Snapshot the usage numbers so the status bar and tooltip can
-				// render them. `prompt_tokens` is the API-reported total — it
-				// already includes history, so we do NOT accumulate across
-				// turns. Each turn's value supersedes the previous one.
-				this._lastPromptTokens = promptTotal;
-				const estimatedBreakdown = inputTokenCount + toolTokenCount;
-				if (promptTotal > 0 && estimatedBreakdown > 0) {
-					this._lastToolTokens = Math.round(promptTotal * (toolTokenCount / estimatedBreakdown));
-					this._lastMessageTokens = Math.max(0, promptTotal - this._lastToolTokens);
-				} else {
-					this._lastMessageTokens = promptTotal;
-					this._lastToolTokens = 0;
-				}
-				this._lastCacheHitTokens = cacheHit;
-				this._lastModelMaxInputTokens = variant.maxInputTokens;
 				// Publish authoritative API values to the shared snapshot.
 				// `usage.prompt_cache_miss_tokens` is computed defensively
 				// here too in case the server omits it (older API behaviour).
+				// Snapshot is the single source of truth for per-turn token
+				// counts — tooltip, status bar, and webview all read from it.
 				this.contextUsage.updateFromApi({
 					modelId: variant.id,
 					modelDisplayName: variant.displayName,
@@ -1502,7 +1462,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					apiReasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
 				});
 				const currHitRate = promptTotal > 0 ? cacheHit / promptTotal : 0;
-				this._lastCacheHitRate = currHitRate;
 				this._peakCacheHitRate = Math.max(this._peakCacheHitRate ?? 0, currHitRate);
 
 				// Detect prompt-cache breakdown caused by local reasoning-cache
