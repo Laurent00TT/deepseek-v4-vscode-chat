@@ -262,35 +262,40 @@ function formatTokenK(tokens: number): string {
 }
 
 /**
- * 5-cell unicode mini progress bar + percentage, e.g. `▰▰▱▱▱ 32.4%`.
+ * Single-glyph pie-chart indicator + percentage, e.g. `◔ 32.4%`.
  *
- * Glyph set: `▰` (U+25B0 BLACK PARALLELOGRAM) + `▱` (U+25B1 WHITE
- * PARALLELOGRAM). Visually distinct from `|` (the surrounding status-
- * bar separator) and from `░` shade patterns — earlier `█▏░` set had
- * the partial-block `▏` collide visually with the `|` separator and
- * the `░` shading looked like texture instead of an empty cell.
+ * The previous 5-cell parallelogram bar (`▰▰▱▱▱ 32.4%`) was visually
+ * cleaner than the earlier block-and-shade attempt but still ate ~6
+ * chars of precious status-bar width. Unicode's pie-chart family
+ * (U+25CB / U+25D4 / U+25D1 / U+25D5 / U+25CF) gives 5-state
+ * progressive fill in ONE character — same glance signal at 1/5 the
+ * width, and visually closer to the round indicator the VS Code
+ * native chat-context widget shows.
  *
- * Bucket-based, not sub-cell partial. A non-zero percentage always
- * fills at least one cell, so 2.6% gives a visible "started" signal
- * (`▰▱▱▱▱`) instead of disappearing into all-empty. Trade-off: 1%
- * looks identical to 24% — acceptable because the numeric percentage
- * to the right is the ground truth; the bar is just a glance cue.
+ *   ○  0%
+ *   ◔  1%–25%
+ *   ◑  25%–50%
+ *   ◕  50%–75%
+ *   ●  75%–100% (or exactly 100%)
+ *
+ * Loses cell-level resolution between 75% and 100%, but the numeric
+ * percentage to the right is the precision instrument anyway.
  */
 function formatStatusBarProgress(pct: number): string {
-	const width = 5;
 	const clamped = Math.max(0, Math.min(1, pct));
-	let cells: number;
+	let glyph: string;
 	if (clamped === 0) {
-		cells = 0;
-	} else if (clamped >= 1) {
-		cells = width;
+		glyph = "○";
+	} else if (clamped < 0.25) {
+		glyph = "◔";
+	} else if (clamped < 0.5) {
+		glyph = "◑";
+	} else if (clamped < 0.75) {
+		glyph = "◕";
 	} else {
-		// Any non-zero pct fills ≥1 cell, scaling up to width-1 just
-		// below 100% so the full-fill bucket is reserved for exactly 1.0.
-		cells = Math.min(width - 1, Math.floor(clamped * (width - 1)) + 1);
+		glyph = "●";
 	}
-	const bar = "▰".repeat(cells) + "▱".repeat(width - cells);
-	return `${bar} ${(clamped * 100).toFixed(1)}%`;
+	return `${glyph} ${(clamped * 100).toFixed(1)}%`;
 }
 
 /**
