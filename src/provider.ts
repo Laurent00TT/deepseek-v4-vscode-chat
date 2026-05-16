@@ -737,50 +737,46 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// updated denominator — reuse it instead of recomputing, so a future
 			// change to the percentage definition only needs to happen in one place.
 			const totalPctStr = (pct * 100).toFixed(1);
-			// Bar: used (█) + remaining input (░) + reserved output (▒).
-			// 40 chars wide — close to the actual rendered width in
-			// MarkdownString code blocks without overflowing the popup.
+			// Bar: 2-segment, used (█) + remaining (░), denominator =
+			// maxInputTokens (NOT the full 1M window). Output budget is a
+			// SEPARATE server-enforced ceiling — it shares the 1M window
+			// but it's an independent dimension, not a continuous resource
+			// that competes with prompt for the same pool. Painting it as
+			// a third stripe in this bar implied "reserved 占用 input 空间",
+			// which misleads visually (38% of bar was structural, not used).
+			// Surface output budget below as text instead.
 			const barWidth = 40;
-			const usedCells = Math.min(barWidth, Math.round((this._lastPromptTokens / totalWindow) * barWidth));
-			const reservedCells = Math.min(barWidth - usedCells, Math.round((maxOutput / totalWindow) * barWidth));
-			const remainingCells = barWidth - usedCells - reservedCells;
-			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells) + "▒".repeat(reservedCells);
+			const usedCells = Math.min(barWidth, Math.round((this._lastPromptTokens / maxInput) * barWidth));
+			const remainingCells = barWidth - usedCells;
+			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells);
 			md.appendMarkdown("**Context Window**\n\n");
-			// Header row: tokens / INPUT budget · percentage · Compact action.
-			// Denominator is maxInputTokens (not the full 1M window) so the
-			// percentage is actionable — see contextUsagePct() rationale.
-			// The progress bar below still visualises used + remaining input
-			// + reserved-output stripe over the full window, which is why the
-			// reserved share appears in the legend.
 			md.appendMarkdown(
 				`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(maxInput)} input` +
 				` &nbsp;·&nbsp; **${totalPctStr}%**` +
 				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
 			);
 			md.appendCodeblock(bar, "");
-			const reservedShare = totalWindow > 0 ? ((maxOutput / totalWindow) * 100).toFixed(0) : "0";
+			// Output budget: a separate server-enforced ceiling. Shown as
+			// plain text (not a bar segment) because it's a different
+			// dimension from the input fill — they share the 1M window but
+			// don't trade off against each other in real time.
 			md.appendMarkdown(
-				`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} · ${reservedShare}% of window)\n\n`,
+				`_Output budget: ${formatTokenK(maxOutput)} &nbsp;·&nbsp; separate, server-enforced_\n\n`,
 			);
 			// Last response: actual completion tokens server-reported (from
-			// the SSE final usage chunk). Surface it next to the reserved
-			// budget so users can see how much of that 384K was actually
-			// used — usually orders of magnitude less, which is useful
-			// information ("I'm reserving more headroom than I ever need").
-			// Split as `reasoning + visible` when the model reports both,
-			// so users can tell whether output cost was reasoning chain
-			// or visible reply.
+			// the SSE final usage chunk). Pairs with the output budget line
+			// above so users see "I'm reserving X but only ever using Y".
 			const lastCompletion = snap.apiCompletionTokens;
 			if (lastCompletion !== undefined && lastCompletion > 0) {
 				const lastReasoning = snap.apiReasoningTokens;
-				const usedOfReserved = ((lastCompletion / maxOutput) * 100).toFixed(1);
+				const usedOfBudget = ((lastCompletion / maxOutput) * 100).toFixed(2);
 				let detail = "";
 				if (lastReasoning !== undefined && lastReasoning > 0) {
 					const visible = Math.max(0, lastCompletion - lastReasoning);
 					detail = ` &nbsp; _${lastReasoning.toLocaleString()} reasoning + ${visible.toLocaleString()} visible_`;
 				}
 				md.appendMarkdown(
-					`\`▶\` &nbsp; Last response: ${lastCompletion.toLocaleString()} tokens (${usedOfReserved}% of reserved)${detail}\n\n`,
+					`\`▶\` &nbsp; Last response: ${lastCompletion.toLocaleString()} tokens (${usedOfBudget}% of budget)${detail}\n\n`,
 				);
 			}
 

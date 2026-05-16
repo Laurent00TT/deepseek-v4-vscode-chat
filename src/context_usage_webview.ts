@@ -158,45 +158,37 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 		}
 
 		function buildUsage(snap) {
-			const totalWindow = snap.maxInputTokens + snap.maxOutputTokens;
 			const used = snap.usedTokens;
 			const reservedOutput = snap.maxOutputTokens;
-			// Bar widths use total-window denominator (visual reflects how the
-			// 1M window is partitioned). Header percentage uses input-budget
-			// denominator (actionable: "how much of my prompt budget is used").
-			// Two denominators, two different questions.
-			const usedPctOfBar = (used / totalWindow) * 100;
-			const reservedPct = (reservedOutput / totalWindow) * 100;
-			const remainingPct = Math.max(0, 100 - usedPctOfBar - reservedPct);
+			// Bar denominator: maxInputTokens (NOT full window). Output
+			// budget is a SEPARATE server-enforced ceiling, not a third
+			// segment of one continuous bar — painting it that way
+			// implied "reserved 占用 input 空间", which misleads visually.
+			// Output info goes into a text row below the bar.
 			const inputPct = snap.maxInputTokens > 0 ? (used / snap.maxInputTokens) * 100 : 0;
+			const remainingInputPct = Math.max(0, 100 - inputPct);
 			const inputPctStr = inputPct.toFixed(1) + '%';
-			const reservedShare = totalWindow > 0 ? (reservedOutput / totalWindow * 100).toFixed(0) : '0';
 
 			const nodes = [];
 
-			// Header: "X / Y input · NN.N%" — denominator is input budget
-			// so the percentage tells the user how full their prompt budget
-			// is, not how much of the structurally-allocated window they've
-			// consumed (the reserved 384K isn't theirs to fill).
+			// Header: "X / Y input · NN.N%"
 			nodes.push(h('div', { class: 'usage-header' },
 				h('div', { class: 'usage-tokens' },
 					fmtK(used) + ' / ' + fmtK(snap.maxInputTokens) + ' input'),
 				h('div', { class: 'usage-percent' }, inputPctStr),
 			));
 
-			// Progress bar (three flex children, widths over TOTAL window)
+			// Progress bar — input-only, 2-segment
 			nodes.push(h('div', { class: 'progress-bar' },
-				h('div', { class: 'filled', style: 'width:' + usedPctOfBar + '%' }),
-				h('div', { style: 'width:' + remainingPct + '%' }),
-				h('div', { class: 'reserved', style: 'width:' + reservedPct + '%' }),
+				h('div', { class: 'filled', style: 'width:' + inputPct + '%' }),
+				h('div', { style: 'width:' + remainingInputPct + '%' }),
 			));
 
-			// Reserved-for-response legend — calls out the share-of-window
-			// percentage so the user understands the bar's striped chunk is
-			// structural, not "another flavor of used".
+			// Output budget — separate server-enforced ceiling. Plain text,
+			// no bar segment, because input and output are independent
+			// dimensions, not a single shared resource.
 			nodes.push(h('div', { class: 'reserved-legend' },
-				h('span', { class: 'reserved-swatch' }),
-				h('span', null, 'Reserved for response (' + fmtK(reservedOutput) + ' · ' + reservedShare + '% of window)'),
+				h('span', null, 'Output budget: ' + fmtK(reservedOutput) + ' (separate, server-enforced)'),
 			));
 
 			// Model section
