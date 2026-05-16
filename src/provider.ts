@@ -262,6 +262,32 @@ function formatTokenK(tokens: number): string {
 }
 
 /**
+ * 5-cell unicode mini progress bar + percentage, e.g. `█▌░░░ 32.4%`.
+ * Used in the status bar where a real CSS bar isn't an option. Partial
+ * cells use 1/8-block sub-glyphs so a single-digit percentage still
+ * produces a visible signal (otherwise 2.6% would render identically
+ * to 0%). Total width including the percentage is ~12 chars.
+ *
+ * Block characters render uniform-width in every major UI font we care
+ * about (system fonts on Win/macOS/Linux all designate U+2580–259F as
+ * full-width), so the bar stays aligned without forcing a code-block.
+ */
+function formatStatusBarProgress(pct: number): string {
+	const width = 5;
+	const clamped = Math.max(0, Math.min(1, pct));
+	const cells = clamped * width;
+	const full = Math.floor(cells);
+	const remainder = cells - full;
+	// 1/8 → 7/8 partial block glyphs (LEFT-ALIGNED so the bar fills left-to-right).
+	const subGlyphs = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+	const subIdx = Math.round(remainder * 8);
+	const partial = subIdx > 0 && full < width ? subGlyphs[subIdx] : "";
+	const empty = Math.max(0, width - full - (partial ? 1 : 0));
+	const bar = "█".repeat(full) + partial + "░".repeat(empty);
+	return `${bar} ${(clamped * 100).toFixed(1)}%`;
+}
+
+/**
  * Surface 4xx API errors with actionable buttons. Fire-and-forget — callers
  * don't await this; the underlying error still throws normally.
  *
@@ -550,7 +576,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			? ` ${currencySymbol(this._balance.currency)}${this._balance.totalBalance.toFixed(2)}`
 			: "";
 		const pct = this.showContextUsage() ? this.contextUsagePct() : undefined;
-		const pctStr = pct !== undefined ? ` | ${(pct * 100).toFixed(1)}%` : "";
+		const pctStr = pct !== undefined ? ` | ${formatStatusBarProgress(pct)}` : "";
 
 		// Single item: `V₄ ¥7.76 | 10.1%`. VS Code statusBarItem.color is
 		// item-wide — there's no way to tint only the percentage without
