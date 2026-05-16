@@ -161,44 +161,33 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 			const totalWindow = snap.maxInputTokens + snap.maxOutputTokens;
 			const used = snap.usedTokens;
 			const reservedOutput = snap.maxOutputTokens;
-			// Bar denominator: 1M total window (SHARED pool). Server
-			// enforces prompt_tokens + completion_tokens ≤ 1M, and our
-			// request's max_tokens=384K reserves a slice of that 1M
-			// pool for output — the reserved stripe in the bar correctly
-			// shows the 384K consuming its share of the same 1M space
-			// that prompt fills from. Header percentage stays at the
-			// input-budget denominator (5%-style), which is actionable
-			// for "how full is my prompt headroom".
-			const usedPctOfBar = (used / totalWindow) * 100;
-			const reservedPct = (reservedOutput / totalWindow) * 100;
-			const remainingPct = Math.max(0, 100 - usedPctOfBar - reservedPct);
-			const inputPct = snap.maxInputTokens > 0 ? (used / snap.maxInputTokens) * 100 : 0;
-			const inputPctStr = inputPct.toFixed(1) + '%';
-			const reservedShare = totalWindow > 0 ? (reservedOutput / totalWindow * 100).toFixed(0) : '0';
+			const lastCompletion = (snap.apiCompletionTokens != null) ? snap.apiCompletionTokens : 0;
+			// Single-turn footprint = prompt + completion, denominator = 1M.
+			// Both are server-reported; this is the most honest "how much
+			// of the shared pool did this turn use" framing.
+			const footprint = used + lastCompletion;
+			const usedPctOfBar = totalWindow > 0 ? (footprint / totalWindow) * 100 : 0;
+			const remainingPct = Math.max(0, 100 - usedPctOfBar);
+			const footprintPctStr = usedPctOfBar.toFixed(1) + '%';
 
 			const nodes = [];
 
-			// Header: "X / Y input · NN.N%" — Y is maxInputTokens (= 1M − max_tokens reserved).
+			// Header: "X / 1M total · NN.N%" — single-turn footprint.
 			nodes.push(h('div', { class: 'usage-header' },
 				h('div', { class: 'usage-tokens' },
-					fmtK(used) + ' / ' + fmtK(snap.maxInputTokens) + ' input'),
-				h('div', { class: 'usage-percent' }, inputPctStr),
+					fmtK(footprint) + ' / ' + fmtK(totalWindow) + ' total'),
+				h('div', { class: 'usage-percent' }, footprintPctStr),
 			));
 
-			// Progress bar — 3-segment over the 1M shared pool
+			// Progress bar — 2-segment over the 1M pool: filled + remaining.
 			nodes.push(h('div', { class: 'progress-bar' },
 				h('div', { class: 'filled', style: 'width:' + usedPctOfBar + '%' }),
 				h('div', { style: 'width:' + remainingPct + '%' }),
-				h('div', { class: 'reserved', style: 'width:' + reservedPct + '%' }),
 			));
 
-			// Reserved-for-response legend — explicit about the shared
-			// pool framing so users understand the stripe is not a
-			// separate ceiling, it's just where our request's max_tokens
-			// = 384K sits inside the 1M window.
+			// Next-turn max_tokens cap — informational, not on the bar.
 			nodes.push(h('div', { class: 'reserved-legend' },
-				h('span', { class: 'reserved-swatch' }),
-				h('span', null, 'Reserved for response (' + fmtK(reservedOutput) + ' · ' + reservedShare + '% of the 1M shared window)'),
+				h('span', null, 'Next response: up to ' + fmtK(reservedOutput) + ' (max_tokens cap)'),
 			));
 
 			// Model section

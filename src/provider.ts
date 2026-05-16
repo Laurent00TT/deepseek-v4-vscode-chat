@@ -609,30 +609,34 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	/**
-	 * Percentage of the INPUT BUDGET used. Denominator is `maxInputTokens`
-	 * (the prompt-token ceiling), NOT the full context window.
+	 * Single-turn footprint as a fraction of the 1M shared context window:
+	 *   numerator   = prompt_tokens + completion_tokens   (server-reported)
+	 *   denominator = maxInputTokens + maxOutputTokens    (= 1M total)
 	 *
-	 * Why not total window: thinking variants reserve 384K for the response,
-	 * which is 37.5% of the 1M total. Dividing by total dilutes the signal —
-	 * a "60% used" reading actually means input is already saturated (614K of
-	 * 640K input budget consumed), but users naturally read 60% as "still
-	 * 40% headroom". The reserved chunk is structural, not consumable, so
-	 * including it in the denominator is misleading.
+	 * Conceptually this is the most honest framing: DeepSeek enforces
+	 * prompt + completion ≤ 1M on a single request, so both quantities
+	 * consume the same shared pool and both are precisely measured. The
+	 * percentage therefore answers "how much of the 1M did this turn
+	 * actually use, end to end".
 	 *
-	 * The progress bar visual in the tooltip / webview still depicts the
-	 * full window (used + remaining input + reserved-output stripe) because
-	 * the bar answers a different question — "where am I in the total
-	 * window" — while this percentage answers "how full is my prompt budget".
+	 * Prior framings (input-only numerator over input-budget denominator)
+	 * hid output cost entirely; including completion_tokens here surfaces
+	 * how much of the budget was actually spent on reasoning + visible
+	 * response, not just prompt history.
 	 *
-	 * Sourced from the ContextUsageService snapshot so all three surfaces
-	 * (status bar, tooltip, webview header) compute it the same way.
+	 * Falls back to estimate (no completion data) before the first response.
 	 */
 	private contextUsagePct(): number | undefined {
 		const snap = this.contextUsage.getSnapshot();
-		if (!snap || snap.maxInputTokens <= 0) {
+		if (!snap) {
 			return undefined;
 		}
-		return snap.usedTokens / snap.maxInputTokens;
+		const totalWindow = snap.maxInputTokens + snap.maxOutputTokens;
+		if (totalWindow <= 0) {
+			return undefined;
+		}
+		const completion = snap.apiCompletionTokens ?? 0;
+		return (snap.usedTokens + completion) / totalWindow;
 	}
 
 	/** Compute session spend from balance diff. Returns undefined until we
@@ -737,48 +741,50 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// updated denominator — reuse it instead of recomputing, so a future
 			// change to the percentage definition only needs to happen in one place.
 			const totalPctStr = (pct * 100).toFixed(1);
-			// Bar: 3-segment, denominator = totalWindow (1M).
-			//
-			// CORRECTNESS NOTE — the 1M context window is a SHARED pool:
-			// prompt_tokens + completion_tokens ≤ 1M (server-enforced).
-			// `max_tokens` in the request reserves output budget out of
-			// that pool, which is why prompt headroom = 1M − max_tokens
-			// = 616K when we set max_tokens=384K. The reserved stripe in
-			// the bar correctly reflects that the 384K is part of the
-			// same 1M, not a separate dimension. A prior revision tried
-			// to paint the bar as "input only" — that hid the true 1M
-			// allocation from view, made max_tokens look like an
-			// independent ceiling, and we've reverted.
+			// Bar: 2-segment over the 1M shared window.
+			//   filled = single-turn footprint (prompt + last completion)
+			//   empty  = remaining window
+			// The reserved 384K is not painted as a separate segment — it
+			// would represent the NEXT turn's max_tokens slot rather than
+			// current usage, and mixing past-actual with future-reserved
+			// in the same bar was the visual confusion. Information about
+			// the next-turn max_tokens budget goes in a text row below.
+			const lastCompletion = snap.apiCompletionTokens ?? 0;
+			const turnFootprint = this._lastPromptTokens + lastCompletion;
 			const barWidth = 40;
-			const usedCells = Math.min(barWidth, Math.round((this._lastPromptTokens / totalWindow) * barWidth));
-			const reservedCells = Math.min(barWidth - usedCells, Math.round((maxOutput / totalWindow) * barWidth));
-			const remainingCells = barWidth - usedCells - reservedCells;
-			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells) + "▒".repeat(reservedCells);
+			const usedCells = Math.min(barWidth, Math.round((turnFootprint / totalWindow) * barWidth));
+			const remainingCells = barWidth - usedCells;
+			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells);
 			md.appendMarkdown("**Context Window**\n\n");
 			md.appendMarkdown(
-				`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(maxInput)} input` +
+				`${formatTokenK(turnFootprint)} / ${formatTokenK(totalWindow)} total` +
 				` &nbsp;·&nbsp; **${totalPctStr}%**` +
 				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
 			);
 			md.appendCodeblock(bar, "");
-			const reservedShare = totalWindow > 0 ? ((maxOutput / totalWindow) * 100).toFixed(0) : "0";
+			// Next-turn max_tokens cap — informational, not occupying bar space.
+			// Server will reserve this much output room out of the 1M pool on
+			// the next request, so prompt headroom on that next request is
+			// effectively (1M − this_value).
 			md.appendMarkdown(
-				`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} · ${reservedShare}% of the 1M window — shared pool, not a separate ceiling)\n\n`,
+				`_Next response: up to ${formatTokenK(maxOutput)} (max_tokens cap)_\n\n`,
 			);
 			// Last response: actual completion tokens server-reported (from
-			// the SSE final usage chunk). Pairs with the output budget line
-			// above so users see "I'm reserving X but only ever using Y".
-			const lastCompletion = snap.apiCompletionTokens;
-			if (lastCompletion !== undefined && lastCompletion > 0) {
+			// the SSE final usage chunk). Already incorporated into the
+			// header percentage above; this row breaks down "of that X%,
+			// how much was reasoning vs visible response" for the most
+			// recent turn.
+			const lastResponseTokens = snap.apiCompletionTokens;
+			if (lastResponseTokens !== undefined && lastResponseTokens > 0) {
 				const lastReasoning = snap.apiReasoningTokens;
-				const usedOfBudget = ((lastCompletion / maxOutput) * 100).toFixed(2);
+				const usedOfBudget = ((lastResponseTokens / maxOutput) * 100).toFixed(2);
 				let detail = "";
 				if (lastReasoning !== undefined && lastReasoning > 0) {
-					const visible = Math.max(0, lastCompletion - lastReasoning);
+					const visible = Math.max(0, lastResponseTokens - lastReasoning);
 					detail = ` &nbsp; _${lastReasoning.toLocaleString()} reasoning + ${visible.toLocaleString()} visible_`;
 				}
 				md.appendMarkdown(
-					`\`▶\` &nbsp; Last response: ${lastCompletion.toLocaleString()} tokens (${usedOfBudget}% of budget)${detail}\n\n`,
+					`\`▶\` &nbsp; Last response: ${lastResponseTokens.toLocaleString()} tokens (${usedOfBudget}% of max_tokens)${detail}\n\n`,
 				);
 			}
 
