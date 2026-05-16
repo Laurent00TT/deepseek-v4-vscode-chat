@@ -742,7 +742,17 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			const remainingCells = barWidth - usedCells - reservedCells;
 			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells) + "▒".repeat(reservedCells);
 			md.appendMarkdown("**Context Window**\n\n");
-			md.appendMarkdown(`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(totalWindow)} tokens &nbsp;&nbsp;&nbsp; **${totalPctStr}%**\n\n`);
+			// Header row: tokens · percentage · Compact action, all inline.
+			// Putting the action next to the metric it acts on (rather than
+			// orphaning it at the bottom) makes the affordance discoverable
+			// at the same eye-fixation as the percentage that tells you
+			// whether you need it. ` · ` separators visually group the three
+			// pieces of information without a heavy divider.
+			md.appendMarkdown(
+				`${formatTokenK(this._lastPromptTokens)} / ${formatTokenK(totalWindow)} tokens` +
+				` &nbsp;·&nbsp; **${totalPctStr}%**` +
+				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
+			);
 			md.appendCodeblock(bar, "");
 			md.appendMarkdown(`\`▒\` &nbsp; Reserved for response (${formatTokenK(maxOutput)} reserved)\n\n`);
 
@@ -756,8 +766,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				md.appendMarkdown(`Messages &nbsp;&nbsp; ~${msgPct}%  \n`);
 				md.appendMarkdown(`Tools &nbsp;&nbsp; ~${toolPct}%\n\n`);
 			}
-
-			md.appendMarkdown("[$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n");
 		}
 
 		// Cache hit-rate row. Surfaces the cheap-vs-expensive token ratio so
