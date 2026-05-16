@@ -13,7 +13,10 @@
  *     actually counted for the last request; the estimate reflects
  *     what we *will* send next. Different requests, different
  *     authority — they shouldn't overwrite each other.
- *   - `usedTokens` prefers the API value, falls back to the estimate.
+ *   - `usedTokens` prefers the API value; falls back to the local
+ *     ESTIMATE TOTAL = estimatedMessageTokens + estimatedToolTokens.
+ *     The API's prompt_tokens covers both messages and tool definitions,
+ *     so the fallback must sum the two estimate buckets to be comparable.
  *   - A model-variant switch invalidates both prior estimate and prior
  *     API values (they described a different model's budget).
  */
@@ -25,9 +28,12 @@ export interface ContextUsageSnapshot {
 	maxInputTokens: number;
 	maxOutputTokens: number;
 
-	// Local estimate (always populated once updateEstimate has been called
-	// at least once this session).
-	estimatedPromptTokens: number;
+	// Local estimate, both buckets. Populated once updateEstimate has been
+	// called at least once this session.
+	// NOTE: `estimatedMessageTokens` is the messages-only char-ratio estimate
+	// (renamed from the old `estimatedPromptTokens`, which was misleading
+	// because the API's `prompt_tokens` actually covers messages + tools).
+	estimatedMessageTokens: number;
 	estimatedToolTokens: number;
 
 	// Authoritative API-reported values. Undefined before the first
@@ -38,11 +44,10 @@ export interface ContextUsageSnapshot {
 	apiCacheMissTokens?: number;
 	apiReasoningTokens?: number;
 
-	// Derived convenience fields. `usedTokens` prefers API value and
-	// falls back to estimate; `percentage` is over the full window
-	// (input + output budgets).
+	// Derived convenience field. `usedTokens` prefers API value and
+	// falls back to the SUM of message + tool estimates (so it stays
+	// comparable to the API's prompt_tokens which covers both).
 	usedTokens: number;
-	percentage: number;
 	updatedAt: number;
 }
 
@@ -54,7 +59,7 @@ export interface EstimateInput {
 	thinking: boolean;
 	maxInputTokens: number;
 	maxOutputTokens: number;
-	estimatedPromptTokens: number;
+	estimatedMessageTokens: number;
 	estimatedToolTokens: number;
 }
 
@@ -92,9 +97,10 @@ export function snapshotFromEstimate(
 	const apiCacheMissTokens = sameModel ? previous?.apiCacheMissTokens : undefined;
 	const apiReasoningTokens = sameModel ? previous?.apiReasoningTokens : undefined;
 
-	const usedTokens = apiPromptTokens ?? input.estimatedPromptTokens;
-	const totalWindow = input.maxInputTokens + input.maxOutputTokens;
-	const percentage = totalWindow > 0 ? usedTokens / totalWindow : 0;
+	// Estimate fallback: messages + tools, so the fallback total is
+	// comparable to the API's prompt_tokens (which also covers both).
+	const estimateTotal = input.estimatedMessageTokens + input.estimatedToolTokens;
+	const usedTokens = apiPromptTokens ?? estimateTotal;
 
 	return {
 		modelId: input.modelId,
@@ -102,7 +108,7 @@ export function snapshotFromEstimate(
 		thinking: input.thinking,
 		maxInputTokens: input.maxInputTokens,
 		maxOutputTokens: input.maxOutputTokens,
-		estimatedPromptTokens: input.estimatedPromptTokens,
+		estimatedMessageTokens: input.estimatedMessageTokens,
 		estimatedToolTokens: input.estimatedToolTokens,
 		apiPromptTokens,
 		apiCompletionTokens,
@@ -110,7 +116,6 @@ export function snapshotFromEstimate(
 		apiCacheMissTokens,
 		apiReasoningTokens,
 		usedTokens,
-		percentage,
 		updatedAt: now,
 	};
 }
@@ -126,12 +131,8 @@ export function snapshotFromApi(
 	now: number,
 ): ContextUsageSnapshot {
 	const sameModel = previous?.modelId === input.modelId;
-	const estimatedPromptTokens = sameModel ? (previous?.estimatedPromptTokens ?? 0) : 0;
+	const estimatedMessageTokens = sameModel ? (previous?.estimatedMessageTokens ?? 0) : 0;
 	const estimatedToolTokens = sameModel ? (previous?.estimatedToolTokens ?? 0) : 0;
-
-	const usedTokens = input.apiPromptTokens;
-	const totalWindow = input.maxInputTokens + input.maxOutputTokens;
-	const percentage = totalWindow > 0 ? usedTokens / totalWindow : 0;
 
 	return {
 		modelId: input.modelId,
@@ -139,16 +140,14 @@ export function snapshotFromApi(
 		thinking: input.thinking,
 		maxInputTokens: input.maxInputTokens,
 		maxOutputTokens: input.maxOutputTokens,
-		estimatedPromptTokens,
+		estimatedMessageTokens,
 		estimatedToolTokens,
 		apiPromptTokens: input.apiPromptTokens,
 		apiCompletionTokens: input.apiCompletionTokens,
 		apiCacheHitTokens: input.apiCacheHitTokens,
 		apiCacheMissTokens: input.apiCacheMissTokens,
 		apiReasoningTokens: input.apiReasoningTokens,
-		usedTokens,
-		percentage,
+		usedTokens: input.apiPromptTokens,
 		updatedAt: now,
 	};
 }
-

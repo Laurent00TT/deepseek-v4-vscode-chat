@@ -203,8 +203,8 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 			));
 
 			// Breakdown (estimate)
-			const msgEstPctNum = snap.estimatedPromptTokens > 0
-				? (snap.estimatedPromptTokens / totalWindow) * 100 : null;
+			const msgEstPctNum = snap.estimatedMessageTokens > 0
+				? (snap.estimatedMessageTokens / totalWindow) * 100 : null;
 			const toolEstPctNum = snap.estimatedToolTokens > 0
 				? (snap.estimatedToolTokens / totalWindow) * 100 : null;
 			if (msgEstPctNum !== null || toolEstPctNum !== null) {

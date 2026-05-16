@@ -1354,7 +1354,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                 thinking: variant.thinking,
                 maxInputTokens: variant.maxInputTokens,
                 maxOutputTokens: variant.maxOutputTokens,
-                estimatedPromptTokens: inputTokenCount,
+                estimatedMessageTokens: inputTokenCount,
                 estimatedToolTokens: toolTokenCount,
             });
             if (inputTokenCount + toolTokenCount > tokenLimit) {

@@ -34,9 +34,6 @@ const PRO_FAST = {
 	maxOutputTokens: 65536,
 };
 
-const TOTAL_WINDOW_THINKING = PRO_THINKING.maxInputTokens + PRO_THINKING.maxOutputTokens; // 1,048,576
-const TOTAL_WINDOW_FAST = PRO_FAST.maxInputTokens + PRO_FAST.maxOutputTokens;             // 1,048,576
-
 function assertEq(label, got, expected) {
 	if (got === expected) {
 		console.log(`  ✓ ${label}`);
@@ -48,10 +45,6 @@ function assertEq(label, got, expected) {
 	return false;
 }
 
-function approxEq(got, expected, eps = 1e-6) {
-	return Math.abs(got - expected) < eps;
-}
-
 let passed = 0;
 let failed = 0;
 function check(ok) {
@@ -59,17 +52,18 @@ function check(ok) {
 }
 
 // === Case 1: First estimate, no previous snapshot ===
-console.log("Case 1: First estimate from empty state");
+console.log("Case 1: First estimate from empty state — fallback sums message + tool buckets");
 {
 	const snap = snapshotFromEstimate(
-		{ ...PRO_THINKING, estimatedPromptTokens: 50_000, estimatedToolTokens: 5_000 },
+		{ ...PRO_THINKING, estimatedMessageTokens: 50_000, estimatedToolTokens: 5_000 },
 		undefined,
 		NOW,
 	);
 	check(assertEq("modelId set", snap.modelId, PRO_THINKING.modelId));
 	check(assertEq("apiPromptTokens still undefined", snap.apiPromptTokens, undefined));
-	check(assertEq("usedTokens falls back to estimate", snap.usedTokens, 50_000));
-	check(assertEq("percentage uses estimate over full window", approxEq(snap.percentage, 50_000 / TOTAL_WINDOW_THINKING), true));
+	// IMPORTANT: usedTokens fallback is message + tool sum (API's
+	// prompt_tokens covers both), not message-only.
+	check(assertEq("usedTokens fallback = messages + tools", snap.usedTokens, 55_000));
 	check(assertEq("updatedAt", snap.updatedAt, NOW));
 }
 
@@ -94,13 +88,14 @@ console.log("Case 2: API value survives a later estimate on same model");
 	check(assertEq("apiCacheHitTokens populated", afterApi.apiCacheHitTokens, 60_000));
 
 	const afterEstimate = snapshotFromEstimate(
-		{ ...PRO_THINKING, estimatedPromptTokens: 5_000, estimatedToolTokens: 1_000 },
+		{ ...PRO_THINKING, estimatedMessageTokens: 5_000, estimatedToolTokens: 1_000 },
 		afterApi,
 		NOW + 1000,
 	);
 	check(assertEq("apiPromptTokens preserved across new estimate", afterEstimate.apiPromptTokens, 73_402));
 	check(assertEq("apiCacheHitTokens preserved", afterEstimate.apiCacheHitTokens, 60_000));
-	check(assertEq("estimate fields updated", afterEstimate.estimatedPromptTokens, 5_000));
+	check(assertEq("message-estimate field updated", afterEstimate.estimatedMessageTokens, 5_000));
+	check(assertEq("tool-estimate field updated", afterEstimate.estimatedToolTokens, 1_000));
 	check(assertEq("usedTokens still uses API (authoritative)", afterEstimate.usedTokens, 73_402));
 }
 
@@ -109,12 +104,12 @@ console.log("");
 console.log("Case 3: Estimate after a clear");
 {
 	const snap = snapshotFromEstimate(
-		{ ...PRO_THINKING, estimatedPromptTokens: 1_000, estimatedToolTokens: 0 },
+		{ ...PRO_THINKING, estimatedMessageTokens: 1_000, estimatedToolTokens: 0 },
 		undefined, // simulates getSnapshot() after clear()
 		NOW,
 	);
 	check(assertEq("no API fields after clear", snap.apiPromptTokens, undefined));
-	check(assertEq("usedTokens is the fresh estimate", snap.usedTokens, 1_000));
+	check(assertEq("usedTokens is messages + tools = 1000 + 0", snap.usedTokens, 1_000));
 }
 
 // === Case 4: Switching model variant drops stale API values ===
@@ -127,18 +122,17 @@ console.log("Case 4: Model-variant switch invalidates prior API data");
 		NOW,
 	);
 
-	// User flips to non-thinking variant; new estimate arrives.
 	const afterSwitch = snapshotFromEstimate(
-		{ ...PRO_FAST, estimatedPromptTokens: 10_000, estimatedToolTokens: 500 },
+		{ ...PRO_FAST, estimatedMessageTokens: 10_000, estimatedToolTokens: 500 },
 		onThinking,
 		NOW + 1000,
 	);
 	check(assertEq("modelId switched", afterSwitch.modelId, PRO_FAST.modelId));
 	check(assertEq("API tokens dropped on model switch", afterSwitch.apiPromptTokens, undefined));
-	check(assertEq("estimatedPromptTokens reflects new variant", afterSwitch.estimatedPromptTokens, 10_000));
-	check(assertEq("usedTokens falls back to new estimate", afterSwitch.usedTokens, 10_000));
+	check(assertEq("estimatedMessageTokens reflects new variant", afterSwitch.estimatedMessageTokens, 10_000));
+	check(assertEq("estimatedToolTokens reflects new variant", afterSwitch.estimatedToolTokens, 500));
+	check(assertEq("usedTokens = messages + tools after switch", afterSwitch.usedTokens, 10_500));
 	check(assertEq("maxInputTokens reflects new variant", afterSwitch.maxInputTokens, PRO_FAST.maxInputTokens));
-	check(assertEq("percentage over new variant's window", approxEq(afterSwitch.percentage, 10_000 / TOTAL_WINDOW_FAST), true));
 }
 
 // === Case 5: snapshotFromApi over same model preserves prior estimate as breadcrumb ===
@@ -146,7 +140,7 @@ console.log("");
 console.log("Case 5: API snapshot keeps prior same-model estimate as breadcrumb");
 {
 	const afterEst = snapshotFromEstimate(
-		{ ...PRO_THINKING, estimatedPromptTokens: 12_345, estimatedToolTokens: 678 },
+		{ ...PRO_THINKING, estimatedMessageTokens: 12_345, estimatedToolTokens: 678 },
 		undefined,
 		NOW,
 	);
@@ -155,7 +149,7 @@ console.log("Case 5: API snapshot keeps prior same-model estimate as breadcrumb"
 		afterEst,
 		NOW + 500,
 	);
-	check(assertEq("estimatedPromptTokens carried over", afterApi.estimatedPromptTokens, 12_345));
+	check(assertEq("estimatedMessageTokens carried over", afterApi.estimatedMessageTokens, 12_345));
 	check(assertEq("estimatedToolTokens carried over", afterApi.estimatedToolTokens, 678));
 	check(assertEq("API values populated", afterApi.apiPromptTokens, 13_000));
 	check(assertEq("usedTokens prefers API even when estimate exists", afterApi.usedTokens, 13_000));
@@ -166,7 +160,7 @@ console.log("");
 console.log("Case 6: API snapshot on different model drops prior estimate");
 {
 	const afterEstOnThinking = snapshotFromEstimate(
-		{ ...PRO_THINKING, estimatedPromptTokens: 12_345, estimatedToolTokens: 678 },
+		{ ...PRO_THINKING, estimatedMessageTokens: 12_345, estimatedToolTokens: 678 },
 		undefined,
 		NOW,
 	);
@@ -175,8 +169,23 @@ console.log("Case 6: API snapshot on different model drops prior estimate");
 		afterEstOnThinking,
 		NOW + 500,
 	);
-	check(assertEq("estimate reset (different model)", afterApiOnFast.estimatedPromptTokens, 0));
+	check(assertEq("message-estimate reset (different model)", afterApiOnFast.estimatedMessageTokens, 0));
+	check(assertEq("tool-estimate reset (different model)", afterApiOnFast.estimatedToolTokens, 0));
 	check(assertEq("API values are from new model", afterApiOnFast.apiPromptTokens, 7_000));
+}
+
+// === Case 7 (regression for #1): fallback must include tool tokens ===
+console.log("");
+console.log("Case 7: usedTokens fallback regression check — tools must not be dropped");
+{
+	// Realistic Copilot Chat agent-mode scenario: ~5K message history,
+	// ~25K of tool definitions. Pre-API total should be ~30K, NOT ~5K.
+	const snap = snapshotFromEstimate(
+		{ ...PRO_THINKING, estimatedMessageTokens: 5_000, estimatedToolTokens: 25_000 },
+		undefined,
+		NOW,
+	);
+	check(assertEq("usedTokens = 5K messages + 25K tools = 30K (NOT 5K)", snap.usedTokens, 30_000));
 }
 
 console.log("");
