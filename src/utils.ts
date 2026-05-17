@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { OpenAIChatMessage, OpenAIChatRole, OpenAIFunctionToolDef, OpenAIToolCall } from "./types";
 import { isValidToolName } from "./tool_names";
+import { resolveToolChoice, type ToolChoice } from "./tool_choice";
 
 // Tool calling sanitization helpers
 
@@ -184,7 +185,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
  */
 export function convertTools(options: vscode.ProvideLanguageModelChatResponseOptions): {
 	tools?: OpenAIFunctionToolDef[];
-	tool_choice?: "auto" | { type: "function"; function: { name: string } };
+	tool_choice?: ToolChoice;
 } {
 	const tools = options.tools ?? [];
 	if (!tools || tools.length === 0) {
@@ -214,14 +215,12 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
 			} satisfies OpenAIFunctionToolDef;
 		});
 
-	let tool_choice: "auto" | { type: "function"; function: { name: string } } = "auto";
-	if (options.toolMode === vscode.LanguageModelChatToolMode.Required) {
-		if (tools.length !== 1) {
-            console.error("[DeepSeek V4] ToolMode.Required but multiple tools:", tools.length);
-            throw new Error("LanguageModelChatToolMode.Required is not supported with more than one tool");
-		}
-		tool_choice = { type: "function", function: { name: tools[0].name } };
-	}
+	// Resolution lives in `tool_choice.ts` (vscode-free, unit-tested).
+	const tool_choice = resolveToolChoice(
+		options.toolMode === vscode.LanguageModelChatToolMode.Required,
+		tools.length,
+		tools[0]?.name,
+	);
 
 	return { tools: toolDefs, tool_choice };
 }
