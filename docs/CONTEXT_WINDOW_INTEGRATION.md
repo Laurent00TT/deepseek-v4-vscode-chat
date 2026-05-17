@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. No implementation has been applied yet. Supersedes the previous
+Implemented (see [Unreleased] in CHANGELOG.md). Supersedes the previous
 draft of this document, which recommended contributing into VS Code's
 native `chat/contextUsage/actions` menu — that menu is gated behind the
 `chatParticipantAdditions` proposed API and is therefore unusable for a
@@ -94,16 +94,21 @@ visual fidelity at the cost of a CSS file's worth of code.
 
 The webview renders the latest `ContextUsageSnapshot`:
 
-- header: `X.X K / Y.Y K total · NN.N%` with the percentage right-aligned
+- header: `X.XK / 1M total · NN.N%` (SI base-1000 so the body's raw
+  decimal Prompt-tokens row reads consistently with the header), with
+  the percentage right-aligned and computed as
+  `(usedTokens + apiCompletionTokens) / totalWindow`
 - 2-segment progress bar (used + remaining) over the 1M shared window
-- "Next response: up to 384K (max_tokens cap)" caption (no longer a
+- "Next response: up to 393.2K (max_tokens cap)" caption (no longer a
   striped bar segment — the reserved chunk represents the NEXT turn's
   max_tokens slot, painting it as a third segment of "current usage"
   was the visual confusion that drove this design)
 - "Last response: N tokens · M reasoning + L visible" row when
   apiCompletionTokens is set
 - Breakdown rows for messages / tools (estimate-derived from server
-  prompt_tokens × local char-ratio split)
+  prompt_tokens × local char-ratio split; both views — webview and
+  status-bar tooltip — share the same formula so the percentages are
+  comparable)
 - Stale `updatedAt` row
 - Outlined `Compact Conversation` button
 
@@ -215,10 +220,13 @@ Two small touches, both already adjacent to existing logic:
   `contextUsage.updateFromApi(usage, variant)` from the same code
   path that currently writes to `_lastPromptTokens` etc.
 
-Eventually the existing `_lastPromptTokens` family of provider fields
-can be removed in favour of reading from `contextUsage` — but that is
-a follow-up cleanup, not a prerequisite. Both writers can coexist
-during the initial migration.
+The `_lastPromptTokens` family of provider fields used to mirror the
+snapshot data so `buildTooltip` could read them back. That two-writer
+pattern was a drift hazard and **review #6 removed it** (commit
+`f565cdf`) — provider now reads everything from
+`contextUsage.getSnapshot()` directly. Only cross-turn state that
+isn't in the snapshot remains on the provider; see "Wire the tooltip"
+section below.
 
 ### 3. Register two commands in `src/extension.ts`
 
@@ -330,13 +338,16 @@ module, tests `import` from `out/*.js`.
 
 ## Non-goals
 
-- Do not contribute into `chat/contextUsage/actions` (proposed API).
 - Do not depend on `ChatResponseStream.usage(...)` or any
   `ChatParticipant` surface.
-- Do not introduce a webview in v1.
 - Do not reintroduce per-tier color on the status-bar item.
 - Do not implement DeepSeek-owned conversation compaction.
 - Do not surface `driftRatio` in the user UI.
+
+(The "Explicitly not in this plan" section above lists the same items
+plus the proposed-API and tokenizer non-goals; that section is the
+canonical list scoped to *this* implementation. Items here are the
+broader product-level non-goals that survive past v1.)
 
 ## Future work
 
@@ -344,7 +355,8 @@ If and when VS Code publishes a stable API for
 `LanguageModelChatProvider` implementations to report usage directly
 into the native widget, we should:
 
-1. Drop the QuickPick in favor of the native widget data path.
+1. Drop our webview in favour of the native widget data path
+   (subscribing extensions to push usage into the host-rendered popup).
 2. Move `compactCopilotChat` to be a contributed action inside that
    widget instead of a separate command.
 

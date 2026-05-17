@@ -32,15 +32,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Tooltip "Context Details" link.** The status-bar tooltip now ends
   with a `$(graph) Context Details` link next to the existing
   `View full log` link, so users can jump from the quick glance into
-  the full QuickPick.
+  the full Context Window webview panel.
 - **`src/context_usage.ts` + `src/context_usage_service.ts`** — shared
   source of truth for the latest snapshot. Pure helpers (vscode-free)
   live in `context_usage.ts`; the stateful wrapper with
   `vscode.EventEmitter` lives in `context_usage_service.ts`, matching
   the pattern already used for `cache_breakdown.ts` and `tool_names.ts`.
-- **`test/unit_context_usage.mjs`** — 26 assertions covering the four
+- **`test/unit_context_usage.mjs`** — 28 assertions covering the four
   invariants from the design doc: estimate vs API authority, model-switch
-  invalidation, clear-state recovery, and the breadcrumb case.
+  invalidation, clear-state recovery, and the breadcrumb case. Plus
+  `test/unit_tool_choice.mjs` (9 assertions) for the new
+  `resolveToolChoice` helper.
+
+### Fixed
+
+- **Token K/M units use SI base-1000.** The previous base-1024 (KiB)
+  formatter caused a confusing mismatch in the Context Window panel
+  where the header showed "106.8K" while the body's Prompt-tokens row
+  showed "109,067" for the same value (109,067 / 1024 = 106.5; only
+  visible after putting both representations side-by-side). LLM APIs
+  universally price and report tokens in decimal, so we now do the
+  same.
+- **`User-Agent` and boot log no longer report `ext=unknown`.** The
+  `EXT_ID` constant was stale (`deepseek-community.…` left over from
+  a fork's previous publisher); `vscode.extensions.getExtension` thus
+  silently returned `undefined` and the version fell back to
+  `"unknown"`. Now reads the version directly from
+  `context.extension.packageJSON`.
+- **SSE handler no longer swallows runtime errors from processDelta.**
+  The try/catch around `JSON.parse(data) + await processDelta(...)`
+  was eating any `processDelta` throw — including the deliberate
+  "Invalid JSON for tool call" raised by `flushToolCallBuffers` on a
+  clean `finish_reason="tool_calls"` chunk. The host saw a successful
+  stream with no tool call, which is the worst-kind silent failure
+  for an agent loop. Parse errors are now caught + logged + continue;
+  everything else propagates.
+- **`ToolMode.Required` with multiple tools no longer throws.**
+  VS Code's `Required` semantic is "must call at least one tool" — with
+  a single candidate that's equivalent to forcing the named function,
+  but with multiple candidates we now send DeepSeek's (OpenAI-compatible)
+  `tool_choice: "required"` literal. Previously the path hard-threw,
+  blocking valid agent scenarios.
+- **Tooltip `MarkdownString.isTrusted` narrowed.** Was `true` (full
+  trust — any `command:URI` in the markdown would execute on click).
+  Now `{ enabledCommands: [...] }` listing exactly the five command IDs
+  the tooltip actually renders. Defense-in-depth against future
+  regressions that might let dynamic data leak into command-link
+  positions.
+
+### Security
+
+- **`npm audit fix` resolves two high-severity advisories**
+  (`GHSA-q3j6-qgpj-74h6` path-traversal and `GHSA-v39h-62p7-jpjc`
+  host-confusion in `fast-uri` ≤3.1.1, both CVSS 7.5). Chain was
+  `@vscode/vsce → secretlint → ajv → fast-uri`. Dev-dependency only,
+  never shipped in the VSIX runtime, but the packaging pipeline
+  itself touched the vulnerable code path.
 
 ### Documentation
 
