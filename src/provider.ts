@@ -702,7 +702,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 
 	private buildTooltip(): vscode.MarkdownString {
 		const md = new vscode.MarkdownString("", true);
-		md.isTrusted = true;
+		// Narrow `isTrusted` to exactly the commands this tooltip renders.
+		// Using `true` (full trust) would allow ANY command:URI in the
+		// markdown to execute on click — defense-in-depth against a future
+		// regression where dynamic data (e.g. balance API response fields,
+		// model display names) leaks into a command-link href position.
+		// Today there's no such path, but principle of least privilege is
+		// free here.
+		md.isTrusted = {
+			enabledCommands: [
+				"deepseekv4.refreshBalance",
+				"deepseekv4.compactCopilotChat",
+				"deepseekv4.showContextWindow",
+				"deepseekv4.showLog",
+				"workbench.action.openSettings",
+			],
+		};
 		md.supportThemeIcons = true;
 
 		md.appendMarkdown("### DeepSeek V4\n\n");
