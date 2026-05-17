@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { DeepSeekV4ChatModelProvider } from "./provider";
 import { showContextUsageWebview, disposeContextUsageWebview } from "./context_usage_webview";
 
-const EXT_ID = "deepseek-community.deepseek-v4-vscode-chat";
 const SECRET_KEY = "deepseekv4.apiKey";
 const MANAGE_COMMAND = "deepseekv4.manage";
 const SHOW_LOG_COMMAND = "deepseekv4.showLog";
@@ -50,8 +49,13 @@ async function validateApiKey(apiKey: string, userAgent: string): Promise<string
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const ext = vscode.extensions.getExtension(EXT_ID);
-	const extVersion = ext?.packageJSON?.version ?? "unknown";
+	// Read version directly from our own extension context. Going via
+	// `vscode.extensions.getExtension(<id>)` with a hard-coded ID is
+	// fragile — a stale ID (e.g. left over from a fork's previous
+	// publisher) silently returns undefined, which falls back to
+	// "unknown" in the UA. We don't have any other reason to look up
+	// our own extension by ID, so just use the context.
+	const extVersion = (context.extension.packageJSON as { version?: string }).version ?? "unknown";
 	const vscodeVersion = vscode.version;
 	const ua = `deepseek-v4-vscode-chat/${extVersion} VSCode/${vscodeVersion}`;
 
