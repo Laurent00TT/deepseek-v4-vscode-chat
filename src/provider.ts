@@ -1623,18 +1623,31 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                         continue;
                     }
 
+						let parsed: Record<string, unknown> | undefined;
 						try {
-							const parsed = JSON.parse(data) as Record<string, unknown>;
-                        // DS sends a final chunk with `usage` populated when
-                        // stream_options.include_usage=true. Capture it before
-                        // dispatching so we have token counts for cost reporting.
-                        if (parsed.usage && typeof parsed.usage === "object") {
-                            lastUsage = parsed.usage as DSUsage;
-                        }
-                        await this.processDelta(ctx, parsed, progress);
-                    } catch {
-                        // Silently ignore malformed SSE lines temporarily
-                    }
+							parsed = JSON.parse(data) as Record<string, unknown>;
+						} catch (e) {
+							// Malformed SSE line — log and skip. These come from
+							// DS occasionally (keep-alive lines, server hiccups);
+							// continuing is safe and matches the OpenAI SDK
+							// convention. Critically, we ONLY catch parse errors
+							// here — any error from processDelta (e.g. clean
+							// finish with invalid tool-call JSON) must propagate
+							// up so the host sees the failed turn instead of a
+							// silently-dropped tool call.
+							this.log("sse.parse_error", {
+								snippet: data.slice(0, 200),
+								err: e instanceof Error ? e.message : String(e),
+							});
+							continue;
+						}
+						// DS sends a final chunk with `usage` populated when
+						// stream_options.include_usage=true. Capture it before
+						// dispatching so we have token counts for cost reporting.
+						if (parsed.usage && typeof parsed.usage === "object") {
+							lastUsage = parsed.usage as DSUsage;
+						}
+						await this.processDelta(ctx, parsed, progress);
                 }
             }
         } finally {
