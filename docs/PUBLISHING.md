@@ -77,9 +77,9 @@ npm run lint
 
 Follow [SemVer](https://semver.org/):
 
-- bug fix → patch (`0.3.0` → `0.3.1`)
-- new feature → minor (`0.3.0` → `0.4.0`)
-- breaking change → major (`0.3.0` → `1.0.0`)
+- bug fix → patch (`0.3.6` → `0.3.7`)
+- new feature → minor (`0.3.6` → `0.4.0`)
+- breaking change → major (`0.3.6` → `1.0.0`)
 
 ```bash
 npm version patch    # or minor / major
@@ -89,17 +89,19 @@ This automatically:
 
 - updates `version` in `package.json`
 - creates a commit with the new version
-- creates a git tag `v0.3.0`
+- creates a git tag `v0.3.6`
 
 ### 3. Update the CHANGELOG
 
-Move the items currently grouped above the latest released version (under the `[released]` banner) into the new version heading, add a date, then amend:
+Add a new `## [x.y.z] - YYYY-MM-DD` heading at the top, move the items
+currently sitting under `[Unreleased]` (or recently merged commits if
+no `[Unreleased]` section was being maintained) under it, then amend:
 
 ```bash
 # Edit CHANGELOG.md, then
 git add CHANGELOG.md
 git commit --amend --no-edit
-git tag -f v0.3.0
+git tag -f v0.3.6
 ```
 
 ### 4. Local sanity check (recommended)
@@ -108,22 +110,22 @@ git tag -f v0.3.0
 npm run package   # runs vsce package
 ```
 
-You should get a `deepseek-v4-vscode-chat-0.3.0.vsix`. Inspect it:
+You should get a `deepseek-v4-vscode-chat-0.3.6.vsix`. Inspect it:
 
 - File size should be small (tens of KB). If it is megabytes, something leaked through `.vscodeignore`.
-- `unzip -l deepseek-v4-vscode-chat-0.3.0.vsix` to list contents — there should be no `src/`, `node_modules/`, or `*.ts` files.
+- `unzip -l deepseek-v4-vscode-chat-0.3.6.vsix` to list contents — there should be no `src/`, `node_modules/`, or `*.ts` files.
 
 Install it locally to smoke-test:
 
 ```bash
-code --install-extension deepseek-v4-vscode-chat-0.3.0.vsix
+code --install-extension deepseek-v4-vscode-chat-0.3.6.vsix
 ```
 
 ### 5. Push and let CI publish
 
 ```bash
 git push origin main
-git push origin v0.3.0
+git push origin v0.3.6
 ```
 
 Pushing the tag triggers `.github/workflows/release.yml`:
@@ -151,11 +153,11 @@ If CI is broken or you want to publish locally:
 # Marketplace
 export VSCE_PAT=<your-marketplace-pat>
 npm run package
-npx @vscode/vsce publish --packagePath ./deepseek-v4-vscode-chat-0.3.0.vsix
+npx @vscode/vsce publish --packagePath ./deepseek-v4-vscode-chat-0.3.6.vsix
 
 # Open VSX
 export OVSX_PAT=<your-openvsx-pat>
-npx ovsx publish ./deepseek-v4-vscode-chat-0.3.0.vsix --pat "$OVSX_PAT"
+npx ovsx publish ./deepseek-v4-vscode-chat-0.3.6.vsix --pat "$OVSX_PAT"
 ```
 
 ---
@@ -164,13 +166,13 @@ npx ovsx publish ./deepseek-v4-vscode-chat-0.3.0.vsix --pat "$OVSX_PAT"
 
 The VS Code Marketplace **does not allow deleting a single version**; you can only unpublish an entire extension. If you ship a broken release:
 
-1. Immediately publish a fixed version (`0.3.0` is broken → publish `0.3.1`).
+1. Immediately publish a fixed version (`0.3.6` is broken → publish `0.3.7`).
 2. Auto-update will skip the bad one for users.
 
 To deprecate a single bad version so VS Code stops serving it:
 
 ```bash
-npx @vscode/vsce unpublish Laurent00TT.deepseek-v4-vscode-chat 0.3.0
+npx @vscode/vsce unpublish Laurent00TT.deepseek-v4-vscode-chat 0.3.6
 ```
 
 This is irreversible — use sparingly.
@@ -206,7 +208,7 @@ Available a few hours after publish on the Marketplace listing page. The Action 
 - [ ] `npm run compile` passes
 - [ ] `npm run lint` passes
 - [ ] `CHANGELOG.md` has a new section with the right date
-- [ ] `package.json` `version` matches the git tag (`v0.3.0` ↔ `0.3.0`)
+- [ ] `package.json` `version` matches the git tag (`v0.3.6` ↔ `0.3.6`)
 - [ ] `npm run package` produces a sane-sized `.vsix`
 - [ ] Local `code --install-extension *.vsix` works end-to-end
 - [ ] `git push` for both branch and tag, CI is green

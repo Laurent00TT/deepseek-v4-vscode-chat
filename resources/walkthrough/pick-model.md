@@ -22,5 +22,8 @@ or refresh the balance.
 ## Cost transparency
 
 Every chat completion logs the prompt-cache hit rate, completion tokens,
-reasoning tokens, and the per-request cost to the **DeepSeek V4** output
-channel. Run **Show DeepSeek V4 Log** to inspect.
+and reasoning tokens to the **DeepSeek V4** output channel. Session
+spend is shown in the status-bar tooltip and is derived from your
+account's `/user/balance` delta, so the figure always matches the real
+bill regardless of DeepSeek's price changes. Run
+**Show DeepSeek V4 Log** to inspect per-request token usage.

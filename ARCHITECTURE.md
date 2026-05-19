@@ -278,8 +278,12 @@ reasoning for.
 
 ## Status bar
 
-The status bar uses `vscode.MarkdownString` with embedded `command:` links —
-clicks fire the `refresh`, `showLog`, and `clearSession` commands.
+The status bar uses `vscode.MarkdownString` with embedded `command:` links.
+The current allowlist (`isTrusted.enabledCommands`) is
+`refreshBalance`, `compactCopilotChat`, `showLog`, and
+`workbench.action.openSettings` (for the reasoning-effort link).
+`clearSession` is no longer surfaced from the tooltip; session-spend
+display rebases automatically on API-key change.
 
 ### The hover-refresh limitation
 
