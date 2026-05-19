@@ -108,7 +108,12 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
 		`script-src 'nonce-${nonce}'`,
 	].join("; ");
 
-	const initialSnapshot = JSON.stringify(snap ?? null);
+	// Escape `</` so that any literal `</script>` substring buried in
+	// snapshot data cannot prematurely terminate the inline <script> tag.
+	// All snapshot sources today are extension-controlled (model name from
+	// MODEL_VARIANTS literals, numeric token counts), but the escape is a
+	// standard JSON-in-HTML safeguard and costs nothing.
+	const initialSnapshot = JSON.stringify(snap ?? null).replace(/<\//g, "<\\/");
 
 	// The <script> body below uses ONLY createElement / textContent —
 	// no innerHTML interpolation — so dynamic data cannot produce HTML
