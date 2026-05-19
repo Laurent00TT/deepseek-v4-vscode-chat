@@ -2,11 +2,34 @@
 
 ## Status
 
-Implemented (see [Unreleased] in CHANGELOG.md). Supersedes the previous
+Implemented (see CHANGELOG.md `[0.3.6]`). Supersedes the previous
 draft of this document, which recommended contributing into VS Code's
 native `chat/contextUsage/actions` menu — that menu is gated behind the
 `chatParticipantAdditions` proposed API and is therefore unusable for a
 Marketplace-published extension.
+
+### Release status (0.3.6)
+
+Of the three surfaces described in this design, only the **status-bar
+percentage indicator + tooltip breakdown** ships as a user-facing
+surface in 0.3.6. The `Show DeepSeek V4 Context Window` webview
+command and the tooltip "Context Details" link are deliberately
+**not exposed** in this release:
+
+- `package.json` omits the command from `contributes.commands`
+  (Command Palette cannot find it).
+- The tooltip no longer renders a `Context Details` markdown link,
+  and the link's command ID is removed from `isTrusted.enabledCommands`.
+- The 95% warning toast no longer offers a `Show Details` button.
+
+The underlying webview module (`src/context_usage_webview.ts`), the
+command registration in `src/extension.ts`, and the dispose hook
+remain compiled. The command stays reachable via
+`vscode.commands.executeCommand('deepseekv4.showContextWindow')` for
+internal callers; re-exposing the user-facing entry in a future
+release is a one-line manifest change. The decision is captured here
+so future readers don't infer "abandoned" from the absence of a
+visible entry.
 
 Assessment based on the local VS Code source at
 `C:\Users\11541\Desktop\projects\vscode` (tag `1.120.0`,
@@ -251,15 +274,22 @@ state that isn't in the snapshot:
 - `_lastCacheWarnTime` — throttle for breakdown warnings
 - `_contextNudgeFired` — one-shot per session 95% nudge
 
-Tooltip also surfaces a `Context Details` link near the bottom that
-runs `deepseekv4.showContextWindow`, connecting the quick-glance
-tooltip to the deep-dive webview.
+In an earlier revision the tooltip ended with a `Context Details`
+markdown link that ran `deepseekv4.showContextWindow`, connecting
+the quick-glance tooltip to the deep-dive webview. That link is
+**withheld from 0.3.6** — see [Release status (0.3.6)](#release-status-036)
+above. The link can be re-added in a future release by appending one
+markdown line to `buildTooltip` and re-adding the command ID to
+`isTrusted.enabledCommands`.
 
 ### 5. Update CHANGELOG
 
-A new `[Unreleased]` entry covering: new commands, new context-usage
-service, tooltip "Context Details" link. No version bump in this PR —
-version bumps when we cut a release tag.
+The `[0.3.6]` entry covers: new commands (`Compact Copilot Chat`,
+`Clear Reasoning Cache`), the new context-usage service, the
+status-bar percentage indicator, and the cache-hit-rate /
+breakdown-warning additions to the tooltip. The internal-only
+`Show DeepSeek V4 Context Window` command is intentionally not
+listed under user-visible Added items.
 
 ### Explicitly not in this plan
 

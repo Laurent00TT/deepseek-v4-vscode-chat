@@ -94,6 +94,13 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand(REFRESH_BALANCE_COMMAND, () => provider.refreshBalance()),
 		vscode.commands.registerCommand(CLEAR_SESSION_COMMAND, () => provider.clearSession()),
 		vscode.commands.registerCommand(CLEAR_REASONING_CACHE_COMMAND, () => provider.clearReasoningCache()),
+		// Intentionally not surfaced in 0.3.6 — `contributes.commands` omits this
+		// ID and the tooltip/toast no longer link to it. Registration is kept so
+		// it remains reachable via `vscode.commands.executeCommand` for internal
+		// callers (e.g. tests, keybindings users opt into) and so re-exposing the
+		// entry in a future release is a one-line manifest change. The backing
+		// webview module (`context_usage_webview.ts`) stays compiled and its
+		// dispose hook above keeps cleanup correct.
 		vscode.commands.registerCommand(SHOW_CONTEXT_WINDOW_COMMAND, () => showContextUsageWebview(provider.contextUsage, outputChannel)),
 		vscode.commands.registerCommand(COMPACT_COPILOT_CHAT_COMMAND, () => bridgeCompactCopilotChat(outputChannel)),
 		vscode.commands.registerCommand(SHOW_CACHE_STATS_COMMAND, () => {

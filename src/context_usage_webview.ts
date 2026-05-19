@@ -363,22 +363,10 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
     display: flex;
     margin-bottom: 8px;
   }
-  .progress-bar .filled, .progress-bar .reserved {
+  .progress-bar .filled {
     height: 100%;
     transition: width 120ms linear;
-  }
-  .progress-bar .filled {
     background-color: var(--vscode-progressBar-background);
-  }
-  .progress-bar .reserved {
-    background: repeating-linear-gradient(
-      -45deg,
-      var(--vscode-progressBar-background) 0,
-      var(--vscode-progressBar-background) 4px,
-      transparent 4px,
-      transparent 8px
-    );
-    opacity: 0.7;
   }
   .reserved-legend {
     display: flex;
@@ -387,20 +375,6 @@ function renderHtml(webview: vscode.Webview, snap: ContextUsageSnapshot | undefi
     margin-bottom: 22px;
     font-size: 0.92em;
     color: var(--vscode-descriptionForeground);
-  }
-  .reserved-swatch {
-    display: inline-block;
-    width: 14px;
-    height: 8px;
-    border-radius: 2px;
-    background: repeating-linear-gradient(
-      -45deg,
-      var(--vscode-progressBar-background) 0,
-      var(--vscode-progressBar-background) 2px,
-      transparent 2px,
-      transparent 4px
-    );
-    opacity: 0.7;
   }
   .section { margin-top: 18px; }
   .section-title {

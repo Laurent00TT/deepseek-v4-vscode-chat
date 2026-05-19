@@ -60,7 +60,6 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | `Manage DeepSeek V4 Provider` | Set or update your API key |
 | `Refresh DeepSeek V4 Balance` | Fetch the latest account balance |
 | `Show DeepSeek V4 Log` | Open the runtime log channel |
-| `Show DeepSeek V4 Context Window` | Open the live context-window panel (header tokens / percentage, model variant, breakdown, last API response, Compact Conversation button) |
 | `Show DeepSeek V4 Reasoning Cache Stats` | Diagnostics for the reasoning cache |
 | `Clear DeepSeek V4 Reasoning Cache` | Purge cached `reasoning_content` (e.g. before sharing a bug log, or after switching projects) |
 | `Clear DeepSeek V4 Session Counter` | Reset the session spend display |
@@ -71,7 +70,7 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | Setting | Values | Default | Description |
 | ------ | ------ | ------ | ------ |
 | `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for `(thinking)` model variants. `high` is faster with shorter reasoning chains; `max` is the deepest setting. No effect on non-thinking variants. Picked up at request time. |
-| `deepseekv4.showContextUsage` | `boolean` | `true` | Show the live context-window usage percentage (e.g. `45.3%`) inline in the status bar, in the standard description-foreground color. Disable to hide the percentage entirely. When usage crosses 95% a one-shot toast surfaces Compact Conversation / Show Details actions; it re-arms only after usage drops back below 80% so a user dismissing the prompt isn't re-nagged on every turn. |
+| `deepseekv4.showContextUsage` | `boolean` | `true` | Show the live context-window usage percentage (e.g. `45.3%`) inline in the status bar, in the standard description-foreground color. Disable to hide the percentage entirely. When usage crosses 95% a one-shot toast surfaces a Compact Conversation action; it re-arms only after usage drops back below 80% so a user dismissing the prompt isn't re-nagged on every turn. |
 | `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream the raw `reasoning_content` to the OutputChannel. Useful for debugging prompt-cache breakdowns but may capture private code/paths/intermediate state — keep **off** when sharing logs in bug reports. |
 
 ## License

@@ -5,98 +5,7 @@ All notable changes to this project will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [released]
-
-## [Unreleased]
-
-### Added
-
-- **`Show DeepSeek V4 Context Window` command.** Opens a webview that
-  1:1 re-creates the visual structure of VS Code 1.120's native
-  `ChatContextUsageDetails` popup: a "X.X K / Y.Y K tokens" header
-  with right-aligned percentage, a thin progress bar with a striped
-  "Reserved for response" segment, Model / Breakdown / Last API
-  response sections, a "Last update Xm ago" timestamp, and a
-  `Compact Conversation` button at the bottom. The webview uses only
-  VS Code theme CSS variables (no hex colors), so it adapts to light
-  / dark / high-contrast themes automatically, and it subscribes to
-  the context-usage service so the panel updates live as new requests
-  complete. Built with `createElement` / `textContent` rather than
-  `innerHTML` so the rendering path has no XSS surface.
-- **`DeepSeek V4: Compact Copilot Chat` command.** Detects whether
-  `github.copilot.chat.compact` is registered (so a freshly-installed
-  Copilot Chat works without an extension reload). If present, runs
-  Copilot's compaction flow; if absent, surfaces a single information
-  message. Does **not** touch DeepSeek-owned state (reasoning cache,
-  balance baseline, etc.) — wording reflects this explicitly.
-- **Tooltip "Context Details" link.** The status-bar tooltip now ends
-  with a `$(graph) Context Details` link next to the existing
-  `View full log` link, so users can jump from the quick glance into
-  the full Context Window webview panel.
-- **`src/context_usage.ts` + `src/context_usage_service.ts`** — shared
-  source of truth for the latest snapshot. Pure helpers (vscode-free)
-  live in `context_usage.ts`; the stateful wrapper with
-  `vscode.EventEmitter` lives in `context_usage_service.ts`, matching
-  the pattern already used for `cache_breakdown.ts` and `tool_names.ts`.
-- **`test/unit_context_usage.mjs`** — 28 assertions covering the four
-  invariants from the design doc: estimate vs API authority, model-switch
-  invalidation, clear-state recovery, and the breadcrumb case. Plus
-  `test/unit_tool_choice.mjs` (9 assertions) for the new
-  `resolveToolChoice` helper.
-
-### Fixed
-
-- **Token K/M units use SI base-1000.** The previous base-1024 (KiB)
-  formatter caused a confusing mismatch in the Context Window panel
-  where the header showed "106.8K" while the body's Prompt-tokens row
-  showed "109,067" for the same value (109,067 / 1024 = 106.5; only
-  visible after putting both representations side-by-side). LLM APIs
-  universally price and report tokens in decimal, so we now do the
-  same.
-- **`User-Agent` and boot log no longer report `ext=unknown`.** The
-  `EXT_ID` constant was stale (`deepseek-community.…` left over from
-  a fork's previous publisher); `vscode.extensions.getExtension` thus
-  silently returned `undefined` and the version fell back to
-  `"unknown"`. Now reads the version directly from
-  `context.extension.packageJSON`.
-- **SSE handler no longer swallows runtime errors from processDelta.**
-  The try/catch around `JSON.parse(data) + await processDelta(...)`
-  was eating any `processDelta` throw — including the deliberate
-  "Invalid JSON for tool call" raised by `flushToolCallBuffers` on a
-  clean `finish_reason="tool_calls"` chunk. The host saw a successful
-  stream with no tool call, which is the worst-kind silent failure
-  for an agent loop. Parse errors are now caught + logged + continue;
-  everything else propagates.
-- **`ToolMode.Required` with multiple tools no longer throws.**
-  VS Code's `Required` semantic is "must call at least one tool" — with
-  a single candidate that's equivalent to forcing the named function,
-  but with multiple candidates we now send DeepSeek's (OpenAI-compatible)
-  `tool_choice: "required"` literal. Previously the path hard-threw,
-  blocking valid agent scenarios.
-- **Tooltip `MarkdownString.isTrusted` narrowed.** Was `true` (full
-  trust — any `command:URI` in the markdown would execute on click).
-  Now `{ enabledCommands: [...] }` listing exactly the five command IDs
-  the tooltip actually renders. Defense-in-depth against future
-  regressions that might let dynamic data leak into command-link
-  positions.
-
-### Security
-
-- **`npm audit fix` resolves two high-severity advisories**
-  (`GHSA-q3j6-qgpj-74h6` path-traversal and `GHSA-v39h-62p7-jpjc`
-  host-confusion in `fast-uri` ≤3.1.1, both CVSS 7.5). Chain was
-  `@vscode/vsce → secretlint → ajv → fast-uri`. Dev-dependency only,
-  never shipped in the VSIX runtime, but the packaging pipeline
-  itself touched the vulnerable code path.
-
-### Documentation
-
-- `docs/CONTEXT_WINDOW_INTEGRATION.md` — design rationale for the new
-  feature, including the verified reason VS Code's native
-  `chat/contextUsage/actions` menu cannot be a contribution target
-  (proposed API, Marketplace-incompatible).
-
-## [0.3.7] - 2026-05-12
+## [0.3.6] - 2026-05-19
 
 ### Added
 
@@ -106,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`deepseekv4.logRawReasoning` setting** (default `false`) gates streaming of raw `reasoning_content` to the OutputChannel. Previously the channel captured every reasoning byte unconditionally, which could leak private code, paths, or intermediate state into bug-report logs.
 - **Cache-hit-rate display in tooltip** plus a breakdown warning when local reasoning-cache misses cause server-side prompt-cache prefix to collapse. Throttled to at most one warning per 5 minutes.
 - **Actionable error dialog for HTTP 400 context-overflow.** Detects "maximum context length" / "reduce the length" wording from DeepSeek and surfaces Start New Chat / Show Log buttons instead of a cryptic 400.
+- **`DeepSeek V4: Compact Copilot Chat` command.** Detects whether `github.copilot.chat.compact` is registered (so a freshly-installed Copilot Chat works without an extension reload). If present, runs Copilot's compaction flow; if absent, surfaces a single information message. Does **not** touch DeepSeek-owned state (reasoning cache, balance baseline, etc.) — wording reflects this explicitly.
+- **One-shot 95% context-window nudge.** When the shared 1M context crosses 95% a single yellow toast offers `Compact Conversation`. Re-arms automatically when usage drops below 80%, so dismissing the prompt does not result in re-nagging every turn.
+- **Internal: `src/context_usage.ts` + `src/context_usage_service.ts`** — shared snapshot for context-window state. Pure helpers (vscode-free) in `context_usage.ts`; stateful wrapper with `vscode.EventEmitter` in `context_usage_service.ts`. Matches the pattern used by `cache_breakdown.ts` and `tool_names.ts`. (Drives the status-bar percentage and tooltip breakdown. The companion `Show DeepSeek V4 Context Window` webview command stays compiled but is intentionally not surfaced in this release — see `docs/CONTEXT_WINDOW_INTEGRATION.md` "Release status (0.3.6)".)
+- **Unit tests:** `test/unit_context_usage.mjs` (28 assertions covering estimate vs API authority, model-switch invalidation, clear-state recovery, and the breadcrumb case) and `test/unit_tool_choice.mjs` (9 assertions for the new `resolveToolChoice` helper).
 
 ### Changed
 
@@ -114,9 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Reasoning-content attachment is thinking-mode only.** Switching from a thinking to a non-thinking variant strips stale `reasoning_content` from prior assistant turns instead of forwarding it.
 - **Thinking variants now configure `maxOutputTokens = 384K`** to cover the full reasoning-chain budget at max effort (was 256K, which silently truncated long chains). Input budgets recomputed as `1M − maxOutputTokens` to honour DeepSeek's combined 1M ceiling.
 - **`ARCHITECTURE.md` cross-turn rule relaxed** to reflect the 2026-05 server behaviour: DeepSeek now accepts requests that omit `reasoning_content` on non-tool-call assistant turns, even when `tools` is advertised.
+- **Tooltip `MarkdownString.isTrusted` narrowed.** Was `true` (full trust — any `command:URI` in the tooltip markdown would execute on click). Now `{ enabledCommands: [...] }` listing exactly the command IDs the tooltip actually renders. Defense-in-depth against future regressions that might let dynamic data leak into command-link positions.
 
 ### Fixed
 
+- **Token K/M units use SI base-1000.** The previous base-1024 (KiB) formatter caused a confusing mismatch where the header showed "106.8K" while the body's Prompt-tokens row showed "109,067" for the same value (109,067 / 1024 = 106.5; only visible after putting both representations side by side). LLM APIs universally price and report tokens in decimal — we now match.
+- **`User-Agent` and boot log no longer report `ext=unknown`.** The `EXT_ID` constant was stale (`deepseek-community.…` left over from a fork's previous publisher); `vscode.extensions.getExtension` silently returned `undefined` and the version fell back to `"unknown"`. Now reads the version directly from `context.extension.packageJSON`.
+- **SSE handler no longer swallows runtime errors from `processDelta`.** The try/catch around `JSON.parse(data) + await processDelta(...)` was eating any `processDelta` throw — including the deliberate "Invalid JSON for tool call" raised by `flushToolCallBuffers` on a clean `finish_reason="tool_calls"` chunk. The host saw a successful stream with no tool call (worst-kind silent failure for an agent loop). Parse errors are now caught + logged + continue; everything else propagates.
+- **`ToolMode.Required` with multiple tools no longer throws.** VS Code's `Required` semantic is "must call at least one tool" — with a single candidate that is equivalent to forcing the named function, but with multiple candidates we now send DeepSeek's (OpenAI-compatible) `tool_choice: "required"` literal. Previously the path hard-threw, blocking valid agent scenarios.
 - **Cancellation now interrupts streaming reads immediately.** The cancellation token is bridged into `reader.cancel()` inside `processStreamingResponse`; previously cancelling a long thinking-mode request would hang `await reader.read()` for tens of seconds waiting for the next SSE chunk.
 - **API key change re-anchors session baseline.** A silent `refreshBalance(true)` fires after the secret listener resets state, so session-spend tracking keeps working after a key swap without requiring the user to manually click the refresh link.
 - **`registerLanguageModelChatProvider` Disposable** is now pushed into `context.subscriptions` so it disposes cleanly on extension deactivate.
@@ -126,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Hardcoded `PRICING` USD/CNY tables and `estimateCost` function (replaced by balance-diff session spend, see Changed).
 - Dead `.vscode-test.mjs` config pointing at a non-existent `out/test/**/*.test.js`.
 - Unconditional raw-reasoning streaming to OutputChannel (now gated by `deepseekv4.logRawReasoning`).
+
+### Security
+
+- **`npm audit fix` resolves two high-severity advisories** (`GHSA-q3j6-qgpj-74h6` path-traversal and `GHSA-v39h-62p7-jpjc` host-confusion in `fast-uri` ≤3.1.1, both CVSS 7.5). Dependency chain was `@vscode/vsce → secretlint → ajv → fast-uri`. Dev-dependency only, never shipped in the VSIX runtime, but the packaging pipeline itself touched the vulnerable code path.
+
+### Documentation
+
+- `docs/CONTEXT_WINDOW_INTEGRATION.md` — design rationale for the context-window subsystem, including the verified reason VS Code's native `chat/contextUsage/actions` menu cannot be a contribution target (proposed API, Marketplace-incompatible), and a "Release status (0.3.6)" section documenting which surfaces ship and which stay internal.
 
 ## [0.3.5] - 2026-05-08
 

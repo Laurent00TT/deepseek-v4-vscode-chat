@@ -713,7 +713,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			enabledCommands: [
 				"deepseekv4.refreshBalance",
 				"deepseekv4.compactCopilotChat",
-				"deepseekv4.showContextWindow",
 				"deepseekv4.showLog",
 				"workbench.action.openSettings",
 			],
@@ -836,7 +835,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		md.appendMarkdown(
 			`**Reasoning effort** &nbsp; \`${currentEffort}\` &nbsp; [$(gear) configure](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)\n\n`,
 		);
-		md.appendMarkdown("[$(graph) Context Details](command:deepseekv4.showContextWindow) &nbsp;·&nbsp; [View full log](command:deepseekv4.showLog)");
+		md.appendMarkdown("[View full log](command:deepseekv4.showLog)");
 
 		return md;
 	}
@@ -945,12 +944,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		const choice = await vscode.window.showWarningMessage(
 			`DeepSeek context window at ${pctStr}% — approaching the 1M limit. Compact the conversation to free space?`,
 			"Compact Conversation",
-			"Show Details",
 		);
 		if (choice === "Compact Conversation") {
 			void vscode.commands.executeCommand("deepseekv4.compactCopilotChat");
-		} else if (choice === "Show Details") {
-			void vscode.commands.executeCommand("deepseekv4.showContextWindow");
 		}
 	}
 

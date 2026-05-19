@@ -3,7 +3,7 @@
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
 	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat.",
-	"version": "0.3.7",
+	"version": "0.3.6",
 	"icon": "assets/icon.png",
 	"author": {
 		"name": "Laurent00TT",
@@ -72,10 +72,6 @@
 			{
 				"command": "deepseekv4.clearReasoningCache",
 				"title": "Clear DeepSeek V4 Reasoning Cache"
-			},
-			{
-				"command": "deepseekv4.showContextWindow",
-				"title": "Show DeepSeek V4 Context Window"
 			},
 			{
 				"command": "deepseekv4.compactCopilotChat",
