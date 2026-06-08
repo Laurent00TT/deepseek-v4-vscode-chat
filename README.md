@@ -11,6 +11,7 @@ Native DeepSeek V4 (Pro / Flash) provider for VS Code Copilot Chat — with full
 - Extended thinking with configurable effort (`high` / `max`, see [Settings](#settings)) and full reasoning chain preserved across multi-turn agent loops
 - Agent-mode tool calling that does not break on the second turn
 - Status bar with live account balance and session spend (auto-detects CNY / USD)
+- Per-conversation context-window usage fed into Copilot Chat's **native** context indicator — it follows the focused chat (small auxiliary requests like chat-title generation are filtered out so they don't skew it)
 - Background balance refresh after each chat (debounced, silent)
 - Persistent reasoning cache (survives VS Code restarts)
 - Actionable error notifications for 400 (reasoning) / 401 / 402 / 422 / 429, plus mid-stream `insufficient_system_resource` truncation handling
@@ -70,7 +71,6 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | Setting | Values | Default | Description |
 | ------ | ------ | ------ | ------ |
 | `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for `(thinking)` model variants. `high` is faster with shorter reasoning chains; `max` is the deepest setting. No effect on non-thinking variants. Picked up at request time. |
-| `deepseekv4.showContextUsage` | `boolean` | `true` | Show the live context-window usage percentage (e.g. `45.3%`) inline in the status bar, in the standard description-foreground color. Disable to hide the percentage entirely. When usage crosses 95% a one-shot toast surfaces a Compact Conversation action; it re-arms only after usage drops back below 80% so a user dismissing the prompt isn't re-nagged on every turn. |
 | `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream the raw `reasoning_content` to the OutputChannel. Useful for debugging prompt-cache breakdowns but may capture private code/paths/intermediate state — keep **off** when sharing logs in bug reports. |
 
 ## License

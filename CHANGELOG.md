@@ -5,6 +5,24 @@ All notable changes to this project will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.7] - 2026-06-08
+
+### Changed
+
+- **Context-window usage now feeds Copilot Chat's _native_ context indicator instead of a custom status-bar percentage.** After each turn the provider reports `usage` (prompt / completion / total / cached tokens) to the host via a `usage`-MIME `vscode.LanguageModelDataPart` on the response `progress` stream. Copilot's native indicator is **per-conversation and follows the focused chat** — something a status-bar item could never do, because a `LanguageModelChatProvider` receives no conversation id and no focus signal. With multiple chats open the old custom percentage could only ever show "the last turn that ran" and visibly swapped between conversations ([#17](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/17)). The status bar now shows balance + session spend only. Mechanism mirrors the upstream [Vizards/deepseek-v4-for-copilot](https://github.com/Vizards/deepseek-v4-for-copilot) provider.
+
+### Added
+
+- **Request classification (`src/request_kind.ts`)** so only real conversation turns drive the native context indicator. Copilot routes many small auxiliary requests through the selected model — notably a `chat-title` request right after the **first** turn, plus progress messages, todo tracking, prompt categorization, git branch/commit messages, and rename suggestions. Each carries only a few hundred tokens; reporting their usage reset the indicator to ~0% (the symptom where the percentage collapsed once the first task finished). Requests are classified by system-prompt prefix (mirrors the upstream classifier); only `main-agent` / `background` (real) turns are reported. 31 assertions in `test/unit_request_kind.mjs`. A `ctxusage` line in the `DeepSeek V4` output channel logs the classified kind and whether it was reported.
+
+### Removed
+
+- **Custom status-bar context-usage percentage (`X.X%`), the tooltip "Context Window" breakdown block, and the `deepseekv4.showContextUsage` setting** — superseded by the native indicator above. The DeepSeek-specific cache-hit-rate row stays in the status-bar tooltip; the one-shot 95% context nudge is unchanged. (`ContextUsageService` and its snapshot remain internally, driving the nudge and the cache-hit row.)
+
+### Fixed
+
+- **[#17](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/17): the status-bar context percentage flickered / swapped between conversations** with multiple chats active, and reflected the most-recently-run chat rather than the focused one. Resolved by delegating context display to Copilot's native per-conversation indicator.
+
 ## [0.3.6] - 2026-05-19
 
 ### Added

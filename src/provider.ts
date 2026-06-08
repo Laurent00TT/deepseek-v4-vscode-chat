@@ -15,6 +15,7 @@ import { convertTools, convertMessages, tryParseJSONObject, validateRequest } fr
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 import { ContextUsageService } from "./context_usage_service";
+import { classifyRequestKind, isReportableContextRequest } from "./request_kind";
 
 const REASONING_CACHE_STATE_KEY = "deepseekv4.reasoningCache";
 
@@ -273,43 +274,6 @@ function formatTokenK(tokens: number): string {
 		return s.endsWith(".0") ? `${s.slice(0, -2)}M` : `${s}M`;
 	}
 	return `${(tokens / 1000).toFixed(1)}K`;
-}
-
-/**
- * Single-glyph pie-chart indicator + percentage, e.g. `◔ 32.4%`.
- *
- * The previous 5-cell parallelogram bar (`▰▰▱▱▱ 32.4%`) was visually
- * cleaner than the earlier block-and-shade attempt but still ate ~6
- * chars of precious status-bar width. Unicode's pie-chart family
- * (U+25CB / U+25D4 / U+25D1 / U+25D5 / U+25CF) gives 5-state
- * progressive fill in ONE character — same glance signal at 1/5 the
- * width, and visually closer to the round indicator the VS Code
- * native chat-context widget shows.
- *
- *   ○  0%
- *   ◔  1%–25%
- *   ◑  25%–50%
- *   ◕  50%–75%
- *   ●  75%–100% (or exactly 100%)
- *
- * Loses cell-level resolution between 75% and 100%, but the numeric
- * percentage to the right is the precision instrument anyway.
- */
-function formatStatusBarProgress(pct: number): string {
-	const clamped = Math.max(0, Math.min(1, pct));
-	let glyph: string;
-	if (clamped === 0) {
-		glyph = "○";
-	} else if (clamped < 0.25) {
-		glyph = "◔";
-	} else if (clamped < 0.5) {
-		glyph = "◑";
-	} else if (clamped < 0.75) {
-		glyph = "◕";
-	} else {
-		glyph = "●";
-	}
-	return `${glyph} ${(clamped * 100).toFixed(1)}%`;
 }
 
 /**
@@ -578,11 +542,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					void this.refreshBalance(true);
 				}
 			}),
-			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (e.affectsConfiguration("deepseekv4.showContextUsage")) {
-					this.refreshStatusBar();
-				}
-			}),
 		);
 
 		this.refreshStatusBar();
@@ -597,26 +556,18 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		const balanceStr = this._balance
 			? ` ${currencySymbol(this._balance.currency)}${this._balance.totalBalance.toFixed(2)}`
 			: "";
-		const pct = this.showContextUsage() ? this.contextUsagePct() : undefined;
-		const pctStr = pct !== undefined ? ` | ${formatStatusBarProgress(pct)}` : "";
-
-		// Single item: `V₄ ¥7.76 | 10.1%`. VS Code statusBarItem.color is
-		// item-wide — there's no way to tint only the percentage without
-		// also tinting V₄ and the balance. Cohabiting in one item is the
-		// priority (avoids other extensions like "No Environment" splitting
-		// us in two), so we forgo local tinting entirely. The tooltip still
-		// surfaces 70%/90% warnings textually.
-		this.statusBar.text = `V₄${balanceStr}${pctStr}`;
+		// Issue #17: the status bar shows the account balance only. Per-turn
+		// context usage used to live here as `| X%`, but a status-bar item has
+		// no conversation id and no focus signal, so with multiple chats open it
+		// could only ever show "the last turn that ran" — it swapped between
+		// conversations. Context usage is now reported to GitHub Copilot Chat's
+		// NATIVE per-conversation context indicator instead (see the `usage`
+		// data part in provideLanguageModelChatResponse).
+		this.statusBar.text = `V₄${balanceStr}`;
 		this.statusBar.color = new vscode.ThemeColor("descriptionForeground");
 		this.statusBar.tooltip = this.buildTooltip();
 		this.statusBar.backgroundColor = undefined;
 		this.statusBar.show();
-	}
-
-	private showContextUsage(): boolean {
-		return vscode.workspace
-			.getConfiguration("deepseekv4")
-			.get<boolean>("showContextUsage", true);
 	}
 
 	/**
@@ -750,70 +701,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 
 		md.appendMarkdown("---\n\n");
 
-		// Context-usage block, styled after VS Code 1.120's native
-		// ChatContextUsageDetails panel (the "Context Window" popup with
-		// the progress bar + striped reserved region + Compact Conversation
-		// button). MarkdownString can't render real CSS progress bars, so
-		// the bar is a unicode-block approximation inside a code block to
-		// force monospace alignment.
-		// Single source of truth: read everything from the snapshot. This
-		// replaces an older path that mirrored snapshot data into
-		// `_lastPromptTokens / _lastMessageTokens / _lastToolTokens /
-		// _lastCacheHitTokens / _lastModelMaxInputTokens / _lastCacheHitRate`
-		// provider fields and read them back here. Two writers (snapshot
-		// vs provider fields) updated in lock-step were a drift hazard;
-		// reading from the snapshot directly eliminates the duplication.
-		const pct = this.contextUsagePct();
+		// Per-turn context usage is no longer rendered here. It's reported to
+		// GitHub Copilot Chat's native per-conversation context indicator
+		// instead (see the `usage` data part in
+		// provideLanguageModelChatResponse), which — unlike a status-bar item —
+		// follows the focused chat. The snapshot is still read below for the
+		// DeepSeek-specific cache-hit row, which Copilot's UI doesn't surface.
 		const snap = this.contextUsage.getSnapshot();
-		if (this.showContextUsage() && pct !== undefined && snap) {
-			const maxInput = snap.maxInputTokens;
-			const maxOutput = snap.maxOutputTokens;
-			const totalWindow = maxInput + maxOutput;
-			const totalPctStr = (pct * 100).toFixed(1);
-			const lastCompletion = snap.apiCompletionTokens ?? 0;
-			const turnFootprint = snap.usedTokens + lastCompletion;
-			const barWidth = 40;
-			const usedCells = Math.min(barWidth, Math.round((turnFootprint / totalWindow) * barWidth));
-			const remainingCells = barWidth - usedCells;
-			const bar = "█".repeat(usedCells) + "░".repeat(remainingCells);
-			md.appendMarkdown("**Context Window**\n\n");
-			md.appendMarkdown(
-				`${formatTokenK(turnFootprint)} / ${formatTokenK(totalWindow)} total` +
-				` &nbsp;·&nbsp; **${totalPctStr}%**` +
-				` &nbsp;·&nbsp; [$(broom) Compact Conversation](command:deepseekv4.compactCopilotChat)\n\n`,
-			);
-			md.appendCodeblock(bar, "");
-			md.appendMarkdown(
-				`_Next response: up to ${formatTokenK(maxOutput)} (max_tokens cap)_\n\n`,
-			);
-			if (lastCompletion > 0) {
-				const lastReasoning = snap.apiReasoningTokens;
-				const usedOfBudget = ((lastCompletion / maxOutput) * 100).toFixed(2);
-				let detail = "";
-				if (lastReasoning !== undefined && lastReasoning > 0) {
-					const visible = Math.max(0, lastCompletion - lastReasoning);
-					detail = ` &nbsp; _${lastReasoning.toLocaleString()} reasoning + ${visible.toLocaleString()} visible_`;
-				}
-				md.appendMarkdown(
-					`\`▶\` &nbsp; Last response: ${lastCompletion.toLocaleString()} tokens (${usedOfBudget}% of max_tokens)${detail}\n\n`,
-				);
-			}
-
-			// Breakdown — derive actual message/tool split from the local
-			// estimate ratios applied to the server-precise prompt total.
-			// Server reports a combined prompt_tokens; the split is
-			// estimate-derived hence the "(local estimate)" subtitle.
-			const msgEst = snap.estimatedMessageTokens;
-			const toolEst = snap.estimatedToolTokens;
-			const estTotal = msgEst + toolEst;
-			if (estTotal > 0 && snap.apiPromptTokens !== undefined) {
-				const msgActual = snap.apiPromptTokens * (msgEst / estTotal);
-				const toolActual = Math.max(0, snap.apiPromptTokens - msgActual);
-				md.appendMarkdown("**Breakdown** &nbsp; _(local estimate)_\n\n");
-				md.appendMarkdown(`Messages &nbsp;&nbsp; ~${(msgActual / totalWindow * 100).toFixed(1)}%  \n`);
-				md.appendMarkdown(`Tools &nbsp;&nbsp; ~${(toolActual / totalWindow * 100).toFixed(1)}%\n\n`);
-			}
-		}
 
 		// Cache hit-rate row — derived from the snapshot. Uses the same
 		// SI-K formatting as the tooltip header so the cached value
@@ -1133,6 +1027,40 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			}
 		}
 		return total;
+	}
+
+	/** Concatenated text of a single chat message (text parts only). */
+	private messageText(m: vscode.LanguageModelChatMessage | undefined): string {
+		if (!m) {
+			return "";
+		}
+		let text = "";
+		for (const part of m.content) {
+			if (part instanceof vscode.LanguageModelTextPart) {
+				text += part.value;
+			}
+		}
+		return text;
+	}
+
+	/** Classify a request (issue #17) so we only report token usage to
+	 * Copilot's native context indicator for real conversation turns — not for
+	 * the small auxiliary requests (chat-title, progress messages, etc.) Copilot
+	 * routes through the model. See `./request_kind`. */
+	private classifyRequest(
+		messages: readonly vscode.LanguageModelChatMessage[],
+		options: ProvideLanguageModelChatResponseOptions,
+	): ReturnType<typeof classifyRequestKind> {
+		const firstText = this.messageText(messages[0]);
+		let latestUserText = "";
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === vscode.LanguageModelChatMessageRole.User) {
+				latestUserText = this.messageText(messages[i]);
+				break;
+			}
+		}
+		const toolNames = options.tools?.map((t) => t.name) ?? [];
+		return classifyRequestKind(firstText, latestUserText, toolNames);
 	}
 
 	private countToolChars(tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined): number {
@@ -1480,6 +1408,45 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					apiCacheMissTokens: usage.prompt_cache_miss_tokens ?? Math.max(0, promptTotal - cacheHit),
 					apiReasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
 				});
+
+				// Issue #17: report token usage to GitHub Copilot Chat's NATIVE
+				// context-window indicator via a `usage` data part. The host owns
+				// the conversation, so its native indicator is inherently
+				// per-conversation and follows window focus — something our own
+				// status-bar item can never do (a LanguageModelChatProvider gets
+				// no conversation id and no focus signal). Mechanism mirrors the
+				// upstream Vizards/deepseek-v4-for-copilot provider.
+				//
+				// BUT only for REAL conversation turns. Copilot routes small
+				// auxiliary requests through the model too — notably a `chat-title`
+				// request right after the first turn — each carrying only a few
+				// hundred tokens. Reporting those would clobber the indicator and
+				// reset the displayed context to ~0%. So we classify the request
+				// and skip the auxiliary kinds (see ./request_kind).
+				try {
+					const kind = this.classifyRequest(messages, options);
+					const reportable = isReportableContextRequest(kind);
+					this.log("ctxusage", { kind, prompt: promptTotal, reported: reportable });
+					if (reportable) {
+						const completion = usage.completion_tokens ?? 0;
+						progress.report(
+							vscode.LanguageModelDataPart.json(
+								{
+									prompt_tokens: promptTotal,
+									completion_tokens: completion,
+									total_tokens: promptTotal + completion,
+									prompt_tokens_details: { cached_tokens: cacheHit },
+								},
+								"usage",
+							),
+						);
+					}
+				} catch (e) {
+					this.log("ctxusage.report_failed", {
+						error: e instanceof Error ? e.message : String(e),
+					});
+				}
+
 				const currHitRate = promptTotal > 0 ? cacheHit / promptTotal : 0;
 				this._peakCacheHitRate = Math.max(this._peakCacheHitRate ?? 0, currHitRate);
 

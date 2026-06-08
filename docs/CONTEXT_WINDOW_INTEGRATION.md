@@ -1,5 +1,44 @@
 # Context Window Integration Design
 
+## Superseded in 0.3.7
+
+**The custom status-bar percentage surface described below was removed in
+0.3.7.** Context-window usage is now reported to GitHub Copilot Chat's
+**native** context indicator instead, via a `usage`-MIME
+`vscode.LanguageModelDataPart` reported on the response `progress` stream
+(`reportCopilotContextUsage`-style; mechanism mirrors the upstream
+[Vizards/deepseek-v4-for-copilot](https://github.com/Vizards/deepseek-v4-for-copilot)).
+
+Why the change (issue #17): a custom status-bar item has **no conversation
+id and no focus signal** — the `LanguageModelChatProvider` API hands the
+provider neither — so the single global percentage could only ever reflect
+"the last turn that ran". With multiple chats open it visibly swapped
+between conversations. The host's native indicator, by contrast, is
+inherently per-conversation and follows the focused chat because Copilot
+owns the conversation.
+
+Two pieces make it correct:
+
+1. **Report usage as a `usage` data part.** After each turn's `usage`
+   arrives we `progress.report(vscode.LanguageModelDataPart.json({ prompt_tokens,
+   completion_tokens, total_tokens, prompt_tokens_details: { cached_tokens } },
+   "usage"))`. `LanguageModelDataPart` is stable API (≥1.116).
+2. **Only report real conversation turns.** Copilot routes many small
+   auxiliary requests through the selected model — notably a `chat-title`
+   request right after the first turn, plus progress messages, todo
+   tracking, prompt categorization, git branch/commit messages, rename
+   suggestions. Each carries only a few hundred tokens; reporting them
+   would reset the native indicator to ~0%. `src/request_kind.ts`
+   classifies requests by system-prompt prefix and we report only
+   `main-agent` / `background` (real) turns. See `test/unit_request_kind.mjs`.
+
+What remains of the 0.3.6 subsystem: the `ContextUsageService` snapshot
+still drives the one-shot 95% nudge and the DeepSeek-specific cache-hit row
+in the status-bar tooltip; the status bar itself now shows balance only.
+The `deepseekv4.showContextUsage` setting and the status-bar percentage /
+tooltip "Context Window" breakdown were removed. The sections below
+describe the original 0.3.6 design and are kept for historical context.
+
 ## Status
 
 Implemented (see CHANGELOG.md `[0.3.6]`). Supersedes the previous

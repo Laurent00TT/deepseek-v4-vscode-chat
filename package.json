@@ -3,7 +3,7 @@
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
 	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat.",
-	"version": "0.3.6",
+	"version": "0.3.7",
 	"icon": "assets/icon.png",
 	"author": {
 		"name": "Laurent00TT",
@@ -94,11 +94,6 @@
 					"default": "max",
 					"markdownDescription": "Reasoning effort for `(thinking)` model variants. Has no effect on non-thinking variants. See [DeepSeek docs](https://api-docs.deepseek.com/guides/thinking_mode)."
 				},
-				"deepseekv4.showContextUsage": {
-					"type": "boolean",
-					"default": true,
-					"markdownDescription": "Show context-window usage percentage in the DeepSeek V4 status bar."
-				},
 				"deepseekv4.logRawReasoning": {
 					"type": "boolean",
 					"default": false,
@@ -155,7 +150,7 @@
 		"prepare-icon": "node scripts/prepare-icon.mjs",
 		"pretest": "npm run compile",
 		"test": "npm run test:unit",
-		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_tool_name_validation.mjs && node test/unit_context_usage.mjs && node test/unit_tool_choice.mjs"
+		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_tool_name_validation.mjs && node test/unit_context_usage.mjs && node test/unit_tool_choice.mjs && node test/unit_request_kind.mjs"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",
