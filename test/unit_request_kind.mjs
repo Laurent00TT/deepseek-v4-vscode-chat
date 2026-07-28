@@ -40,6 +40,11 @@ console.log("Case 1: auxiliary kinds are classified and are NOT reportable");
 		["git-branch-name", "You are an expert in crafting pithy branch names for a repository."],
 		["git-commit-message", "You are an AI programming assistant, helping a software developer to come with the best git commit message."],
 		["rename-suggestions", "You are a distinguished software engineer tasked with renaming a symbol."],
+		// Copilot conversation summarization / compaction — the request that
+		// re-renders the whole history. Prefix verified against
+		// microsoft/vscode-copilot-chat summarizedConversationHistory.tsx
+		// (shared by full and simple summarization modes). Issue #19.
+		["conversation-summarizer", "Your task is to create a comprehensive, detailed summary of the entire conversation that captures all essential information needed to seamlessly continue the work."],
 	];
 	for (const [kind, prompt] of aux) {
 		const got = classifyRequestKind(prompt, "do it", []);

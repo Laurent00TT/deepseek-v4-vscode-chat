@@ -1,9 +1,9 @@
 /**
  * Classify an incoming Copilot Chat request by its system-prompt prefix so we
- * can tell a real conversation turn from the many small AUXILIARY requests
- * Copilot routes through the selected model — chat-title generation, progress
+ * can tell a real conversation turn from the many AUXILIARY requests Copilot
+ * routes through the selected model — chat-title generation, progress
  * messages, todo tracking, prompt categorization, git branch/commit messages,
- * rename suggestions, etc.
+ * rename suggestions, conversation summarization (compaction), etc.
  *
  * Why this matters (issue #17): we report token usage to Copilot's NATIVE
  * context-window indicator (see the `usage` data part in provider.ts). Copilot
@@ -31,6 +31,7 @@ export type RequestKind =
 	| "git-branch-name"
 	| "git-commit-message"
 	| "rename-suggestions"
+	| "conversation-summarizer"
 	| "background"
 	| "unknown";
 
@@ -48,6 +49,15 @@ const GIT_BRANCH_NAME_PREFIX = "You are an expert in crafting pithy branch names
 const GIT_COMMIT_MESSAGE_PREFIX =
 	"You are an AI programming assistant, helping a software developer to come with the best git commit message";
 const RENAME_SUGGESTIONS_PREFIX = "You are a distinguished software engineer";
+/** Copilot's conversation-summarization (compaction) request. Verified against
+ * microsoft/vscode-copilot-chat `summarizedConversationHistory.tsx`: both the
+ * full and the "simple" summarization modes share one SystemMessage whose text
+ * begins with this sentence. Summarization requests re-render the whole
+ * conversation history, so their reasoning fingerprints systematically miss
+ * and their prompt prefix is novel — they must never feed the cache-breakdown
+ * warning or the context indicator (issue #19). */
+const CONVERSATION_SUMMARIZER_PREFIX =
+	"Your task is to create a comprehensive, detailed summary of the entire conversation";
 const MAIN_AGENT_PREFIX = "You are an expert AI programming assistant";
 const TERMINAL_NOTIFICATION_PATTERN = /^\[Terminal\s+\S+\s+notification:/;
 
@@ -97,6 +107,9 @@ export function classifyRequestKind(
 	if (first.startsWith(RENAME_SUGGESTIONS_PREFIX)) {
 		return "rename-suggestions";
 	}
+	if (first.startsWith(CONVERSATION_SUMMARIZER_PREFIX)) {
+		return "conversation-summarizer";
+	}
 	if (
 		first.startsWith(MAIN_AGENT_PREFIX) ||
 		first.includes("<skills>") ||
@@ -111,11 +124,18 @@ export function classifyRequestKind(
 }
 
 /**
- * Whether a request's token usage should drive the native context-window
- * indicator. Only real conversation turns qualify: `main-agent` (agent-mode
+ * Whether a request is a REAL conversation turn: `main-agent` (agent-mode
  * turns) and `background` (the catch-all that covers ordinary ask-mode chat).
- * Every recognised auxiliary kind — and the empty `unknown` — is excluded so it
- * can't reset the indicator with its tiny, non-conversational context.
+ * Every recognised auxiliary kind — and the empty `unknown` — is excluded.
+ *
+ * Two consumers (both in provider.ts):
+ *   - the native context-window indicator usage report (issue #17): auxiliary
+ *     requests would reset the indicator with their tiny, non-conversational
+ *     context;
+ *   - the prompt-cache-breakdown statistics and warning (issue #19): auxiliary
+ *     requests have a novel prompt prefix (legitimately ~0% server cache hit)
+ *     and re-rendered history (fingerprint misses), so feeding them into the
+ *     peak/current hit-rate comparison fired false "cache breakdown" popups.
  */
 export function isReportableContextRequest(kind: RequestKind): boolean {
 	return kind === "main-agent" || kind === "background";

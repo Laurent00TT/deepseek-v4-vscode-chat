@@ -118,17 +118,32 @@ export class ReasoningCache {
 		this.onChange?.();
 	}
 
-	get(fingerprint: string): string | undefined {
+	/**
+	 * Look up a turn's reasoning. `countStats=false` performs the same lookup
+	 * (including the LRU bump — keeping active-conversation entries fresh is
+	 * desirable regardless of who asks) but leaves the hit/miss counters
+	 * untouched. Copilot's auxiliary requests (chat-title, summarization, …)
+	 * re-render history so their fingerprints systematically miss; letting
+	 * them count would deflate the hit rate shown by Show Cache Stats — the
+	 * very surface users are told to trust for diagnosis (issue #19).
+	 */
+	get(fingerprint: string, countStats = true): string | undefined {
 		if (!fingerprint) {
 			return undefined;
 		}
-		this._totalGets++;
+		if (countStats) {
+			this._totalGets++;
+		}
 		const idx = this.buffer.findIndex((e) => e.fingerprint === fingerprint);
 		if (idx === -1) {
-			this._totalMisses++;
+			if (countStats) {
+				this._totalMisses++;
+			}
 			return undefined;
 		}
-		this._totalHits++;
+		if (countStats) {
+			this._totalHits++;
+		}
 		// LRU bump: move to end. Total bytes unchanged since we splice+push
 		// the same entry — no need to adjust _totalBytes.
 		const entry = this.buffer.splice(idx, 1)[0];

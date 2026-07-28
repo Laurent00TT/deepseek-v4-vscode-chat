@@ -15,9 +15,15 @@ import { convertTools, convertMessages, tryParseJSONObject, validateRequest } fr
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 import { ContextUsageService } from "./context_usage_service";
-import { classifyRequestKind, isReportableContextRequest } from "./request_kind";
+import { classifyRequestKind, isReportableContextRequest, type RequestKind } from "./request_kind";
 
 const REASONING_CACHE_STATE_KEY = "deepseekv4.reasoningCache";
+
+/** Fallback text emitted as a real TextPart when the host lacks
+ * LanguageModelThinkingPart. Shared by the stream path (emit) and
+ * persistReasoningForTurn (which must refuse to fingerprint a turn whose
+ * only text is this constant — see the degenerate-anchor comment there). */
+const THINKING_FALLBACK_HINT = "💭 Thinking...\n\n";
 
 const BASE_URL = "https://api.deepseek.com/v1";
 
@@ -801,6 +807,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * Triggered by `shouldWarnCacheBreakdown`. The two CTAs (start a new chat
 	 * vs inspect the cache stats) cover the two reasonable responses: cut
 	 * losses, or diagnose. Either is better than silently burning money.
+	 *
+	 * The message deliberately lists causes without asserting one: the code
+	 * cannot tell WHY a fingerprint missed (issue #19 was misdiagnosed for
+	 * weeks because an earlier wording claimed "lost across a restart" as
+	 * fact). Diagnosis belongs in Show Cache Stats, not in the toast.
 	 */
 	private async warnCacheBreakdown(
 		currHitRate: number,
@@ -811,7 +822,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		const peak = (peakHitRate * 100).toFixed(0);
 		const missWord = reasoningMisses === 1 ? "miss" : "misses";
 		const choice = await vscode.window.showWarningMessage(
-			`DeepSeek prompt cache hit rate dropped to ${curr}% (peak ${peak}%). ${reasoningMisses} reasoning cache ${missWord} this turn — the local reasoning cache was likely evicted or lost across a restart. Continuing risks higher cost (cache-miss tokens cost ~12× more).`,
+			`DeepSeek prompt cache hit rate dropped to ${curr}% (peak ${peak}%). ${reasoningMisses} reasoning cache ${missWord} this turn broke the cached prompt prefix — possible causes: an earlier turn that was cancelled or failed mid-stream, cache eviction in a very long session, or an editor restart. Continuing risks higher cost (cache-miss tokens cost ~12× more).`,
 			"Start New Chat",
 			"Show Cache Stats",
 		);
@@ -1228,6 +1239,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                     return m.role;
                 }),
             });
+            // Classify the request once, up front. Three consumers: the
+            // reasoning-cache stats gate right below, the native context-
+            // indicator usage report, and the cache-breakdown warning (both
+            // in the post-stream usage block). On classifier failure fall
+            // back to "unknown", which every consumer excludes — a real turn
+            // simply re-classifies on its next request.
+            let kind: RequestKind = "unknown";
+            try {
+                kind = this.classifyRequest(messages, options);
+            } catch (e) {
+                this.log("ctxusage.classify_failed", {
+                    error: e instanceof Error ? e.message : String(e),
+                });
+            }
+            const isRealTurn = isReportableContextRequest(kind);
+
             // Only attach reasoning_content when the current request is in
             // thinking mode. Sending reasoning_content to a non-thinking
             // endpoint wastes prefix tokens (server still has to tokenise it
@@ -1235,9 +1262,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             // prompt-cache prefix anyway. When user switches from a thinking
             // variant to a non-thinking one mid-conversation, prior assistant
             // turns may also already carry reasoning_content — strip it.
+            //
+            // The attach itself runs for EVERY thinking request — auxiliary
+            // requests need the "" stub too or the API 400s — but only real
+            // conversation turns count toward the cache hit/miss statistics.
             let reasoningStats = { hits: 0, misses: 0 };
             if (variant.thinking) {
-                reasoningStats = this.attachReasoningToHistory(openaiMessages);
+                reasoningStats = this.attachReasoningToHistory(openaiMessages, isRealTurn);
             } else {
                 for (const m of openaiMessages) {
                     if (m.role === "assistant" && m.reasoning_content !== undefined) {
@@ -1423,11 +1454,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				// hundred tokens. Reporting those would clobber the indicator and
 				// reset the displayed context to ~0%. So we classify the request
 				// and skip the auxiliary kinds (see ./request_kind).
+				// `kind` / `isRealTurn` were classified once at request start
+				// (before the reasoning attach) and are reused here.
 				try {
-					const kind = this.classifyRequest(messages, options);
-					const reportable = isReportableContextRequest(kind);
-					this.log("ctxusage", { kind, prompt: promptTotal, reported: reportable });
-					if (reportable) {
+					this.log("ctxusage", { kind, prompt: promptTotal, reported: isRealTurn });
+					if (isRealTurn) {
 						const completion = usage.completion_tokens ?? 0;
 						progress.report(
 							vscode.LanguageModelDataPart.json(
@@ -1448,20 +1479,34 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				}
 
 				const currHitRate = promptTotal > 0 ? cacheHit / promptTotal : 0;
-				this._peakCacheHitRate = Math.max(this._peakCacheHitRate ?? 0, currHitRate);
 
-				// Detect prompt-cache breakdown caused by local reasoning-cache
-				// misses. See shouldWarnCacheBreakdown for the causal rationale.
-				if (
-					shouldWarnCacheBreakdown(
-						currHitRate,
-						this._peakCacheHitRate,
-						reasoningStats.misses,
-						this._lastCacheWarnTime,
-					)
-				) {
-					this._lastCacheWarnTime = Date.now();
-					void this.warnCacheBreakdown(currHitRate, this._peakCacheHitRate, reasoningStats.misses);
+				// Issue #19: peak tracking and the breakdown warning consider
+				// REAL conversation turns only. Copilot's auxiliary requests
+				// (chat-title, conversation-summarizer, todo tracking, …)
+				// carry a novel prompt prefix, so their server cache hit rate
+				// is legitimately ~0%, and Copilot re-renders history inside
+				// them so their reasoning fingerprints can miss — comparing
+				// their numbers against a peak set by the main conversation
+				// produced false "cache breakdown" popups while the main chat
+				// was perfectly healthy. (The contextUsage snapshot above is
+				// deliberately NOT gated: the status-bar "last turn" row shows
+				// the raw truth of whatever request ran last.)
+				if (isRealTurn) {
+					this._peakCacheHitRate = Math.max(this._peakCacheHitRate ?? 0, currHitRate);
+
+					// Detect prompt-cache breakdown caused by local reasoning-cache
+					// misses. See shouldWarnCacheBreakdown for the causal rationale.
+					if (
+						shouldWarnCacheBreakdown(
+							currHitRate,
+							this._peakCacheHitRate,
+							reasoningStats.misses,
+							this._lastCacheWarnTime,
+						)
+					) {
+						this._lastCacheWarnTime = Date.now();
+						void this.warnCacheBreakdown(currHitRate, this._peakCacheHitRate, reasoningStats.misses);
+					}
 				}
 
 				// Context-window nudge at 95%. Fires once per session; auto-rearms
@@ -1631,8 +1676,36 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
         } finally {
             cancelSub.dispose();
             reader.releaseLock();
-            // ctx is per-call, so no leftover state needs to be cleared here —
-            // it just goes out of scope when the request finishes.
+            // Best-effort cache write for ABNORMAL exits: user cancellation
+            // breaks the read loop before any finish_reason/[DONE], and a
+            // mid-stream throw (e.g. flushToolCallBuffers rejecting invalid
+            // tool-call JSON) propagates before the normal persist call. In
+            // both cases the host may keep the partially-streamed assistant
+            // turn in chat history — and any history turn missing from the
+            // reasoning cache is a guaranteed fingerprint miss (and a broken
+            // server prompt-cache prefix) on EVERY later request in the
+            // conversation (issue #19). The fingerprint is computed over
+            // ctx.emittedText/emittedToolCalls, i.e. exactly what was already
+            // reported to the host, so partial turns key correctly.
+            // Idempotent: clean finish paths already persisted and reset
+            // ctx.reasoning, making this a no-op for normal exits. Wrapped so
+            // a failure here can never mask an in-flight exception from the
+            // try block (finally-throw would replace it).
+            try {
+                this.persistReasoningForTurn(ctx);
+            } catch (e) {
+                // persistReasoningForTurn writes to the output channel, so
+                // the most plausible throw is a disposed channel during
+                // shutdown — in which case this.log would throw again and
+                // clobber the in-flight exception. Swallow-log defensively.
+                try {
+                    this.log("cache.persist_failed", {
+                        error: e instanceof Error ? e.message : String(e),
+                    });
+                } catch {
+                    // Output channel disposed mid-shutdown; nothing to do.
+                }
+            }
         }
         return lastUsage;
     }
@@ -1690,7 +1763,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					console.error("[DeepSeek V4] ThinkingPart emit failed", e);
 				}
 			} else if (!ctx.hasShownThinkingHint) {
-				progress.report(new vscode.LanguageModelTextPart("💭 Thinking...\n\n"));
+				progress.report(new vscode.LanguageModelTextPart(THINKING_FALLBACK_HINT));
 				ctx.hasShownThinkingHint = true;
 				emitted = true;
 			}
@@ -1805,13 +1878,24 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             this.outputChannel.appendLine("");
         }
         this.outputChannel.appendLine(`[${new Date().toISOString().slice(11, 23)}] thinking.end ▲ (${ctx.reasoning.length} chars)`);
+        // Degenerate anchor: on hosts without LanguageModelThinkingPart the
+        // hint is a real TextPart, so EVERY turn cancelled before its first
+        // content/tool-call delta has emittedText === THINKING_FALLBACK_HINT.
+        // Fingerprinting that constant would make unrelated cancelled turns
+        // share one tx: key and overwrite each other's reasoning — attaching
+        // the WRONG chain to a turn is worse than a clean miss. Treat it as
+        // no anchor instead.
+        const anchorText =
+            ctx.emittedToolCalls.length === 0 && ctx.emittedText.trim() === THINKING_FALLBACK_HINT.trim()
+                ? ""
+                : ctx.emittedText;
         const fp = fingerprintAssistantTurn({
-            text: ctx.emittedText,
+            text: anchorText,
             toolCalls: ctx.emittedToolCalls,
         });
         if (!fp) {
-            // No anchor (no text emitted AND no tool calls). Can't key this
-            // turn into the cache; drop the reasoning silently.
+            // No anchor (no keyable text emitted AND no tool calls). Can't
+            // key this turn into the cache; drop the reasoning silently.
             this.log("cache.skip", { reason: "no-anchor", reasoningLen: ctx.reasoning.length });
             ctx.reasoning = "";
             return;
@@ -1866,8 +1950,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
      * On cache miss, sets reasoning_content="" as fallback to prevent a
      * guaranteed 400 from the API. The conversation may be slightly degraded
      * (the model loses one turn's reasoning context) but can continue.
+     *
+     * `countStats=false` (auxiliary requests) performs the identical attach —
+     * the "" stub is required for every thinking request — but keeps the
+     * lookups out of the cache's hit/miss statistics; see ReasoningCache.get.
+     * The returned {hits, misses} always reflects THIS request regardless.
      */
-    private attachReasoningToHistory(messages: OpenAIChatMessage[]): { hits: number; misses: number } {
+    private attachReasoningToHistory(messages: OpenAIChatMessage[], countStats = true): { hits: number; misses: number } {
         let hits = 0;
         let misses = 0;
         for (const msg of messages) {
@@ -1887,7 +1976,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             if (!fp) {
                 continue;
             }
-            const reasoning = this._reasoningCache.get(fp);
+            const reasoning = this._reasoningCache.get(fp, countStats);
             if (reasoning) {
                 msg.reasoning_content = reasoning;
                 hits++;

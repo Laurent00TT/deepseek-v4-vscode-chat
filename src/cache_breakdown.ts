@@ -11,6 +11,12 @@
  * legitimately drop the hit rate but aren't actionable bugs and
  * shouldn't pop a warning. The peakHitRate gate excludes users whose
  * cache never worked in the first place.
+ *
+ * NOTE: the caller must only feed REAL conversation turns into this
+ * check (see isReportableContextRequest in request_kind.ts). Copilot's
+ * auxiliary requests (chat-title, summarization, …) legitimately score
+ * ~0% hit rate with fingerprint misses and would fire false positives
+ * against a peak set by the main conversation (issue #19).
  */
 export function shouldWarnCacheBreakdown(
 	currHitRate: number,
