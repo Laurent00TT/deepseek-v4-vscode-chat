@@ -120,7 +120,7 @@ The 400 is still possible for tool-call turns under strict server modes, so the 
 
 ### Solution: local reasoning cache + fingerprint index
 
-#### Write side (when a streamed response completes)
+#### Write side (when a streamed response completes — or aborts)
 
 When SSE delivers `finish_reason` or `[DONE]`, the full `reasoning_content`
 of the current turn has already accumulated into `ctx.reasoning` (see
@@ -135,6 +135,18 @@ the host `progress` callback also accumulates:
 `persistReasoningForTurn(ctx)` then computes a fingerprint, writes the
 entry to the LRU `_reasoningCache`, and persists to `globalState`
 (debounced 200 ms).
+
+Abnormal exits are covered too (issue #19): `processStreamingResponse`'s
+`finally` makes an idempotent best-effort `persistReasoningForTurn` call, so
+a turn cancelled mid-stream (Stop button) or aborted by a mid-stream error
+still caches whatever reasoning was received, keyed over exactly the parts
+already reported to the host. Without this, the host keeps the partial
+assistant turn in history while the cache has no entry for it — a guaranteed
+fingerprint miss (and a broken server prompt-cache prefix) on every later
+request in that conversation. One deliberate exception: a turn whose only
+emitted text is the `💭 Thinking...` fallback hint is treated as having no
+anchor — that constant text would give every such cancelled turn the same
+`tx:` key, and unrelated turns would overwrite each other's reasoning.
 
 #### Read side (start of every new request)
 
