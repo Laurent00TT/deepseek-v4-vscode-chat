@@ -5,6 +5,16 @@ All notable changes to this project will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **[#20](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/20): one over-long MCP tool name crashed every chat request.** PyLance v2026.3.1's `pylanceCheckSignatureCompatibility` arrives behind VS Code's MCP prefix as a 72-char name, violating DeepSeek's `^[A-Za-z0-9_-]{1,64}$` function-name spec — and `validateTools` hard-threw on the first illegal name, so any Python user with current PyLance lost chat entirely (the request never reached the model). Tool names are now **deterministically wire-aliased** instead of rejected: spec-legal names pass through unchanged; illegal characters become `_` with an `fnv1a32` hash of the original appended to every changed alias (bare sanitization is lossy — `weather.get` would collide with a legitimate `weather_get` sibling, and equal-length CJK names would all collapse to the same underscore run); names too long for `sanitized+hash` compress to `head(22) + tail(32) + hash` (exactly 64 chars — the tail keeps the semantically distinguishing suffix legible for the model). The stream layer maps the model's echoed alias back to the host name before reporting, so VS Code's tool registry always dispatches on the names it registered — resolving the "the model's echo wouldn't match the registry" objection that made 0.3.6 choose hard rejection over the upstream fork's silent rewriting (which had no reverse map and routed calls nowhere). Reasoning-cache fingerprints key on wire names on **both** the write side (`ctx.emittedToolCalls`) and the read side (over `convertMessages` output); keying them differently would have made every aliased tool call a guaranteed cache miss — issue #19's reasoning-loss failure mode all over again. Names that are unusable even after aliasing (empty or non-string) or that collide (vanishingly rare hash collision) skip just that tool with a logged error instead of failing the request.
+
+### Added
+
+- **`test/unit_tool_wire_name.mjs`** — 31 assertions covering spec-legal passthrough, sanitization, the exact issue #20 PyLance name, determinism, idempotence, sibling-collision resistance, and `buildWireNameMap` round-trip/first-wins semantics. A frozen-literal case pins the aliasing algorithm: changing the head/tail split or hash function breaks fingerprint continuity for conversations spanning extension versions, so it must be a deliberate versioned decision, not drift.
+
 ## [0.3.8] - 2026-07-28
 
 ### Fixed

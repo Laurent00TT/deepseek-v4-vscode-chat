@@ -16,7 +16,7 @@ DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, op
     │
     ├─ convertMessages(messages)         ← VS Code parts → OpenAI message[]
     ├─ attachReasoningToHistory(out)     ← inject cached reasoning_content into prior assistant turns
-    ├─ convertTools(options)             ← VS Code tools → OpenAI function tool defs
+    ├─ convertTools(options)             ← VS Code tools → OpenAI function tool defs (host names → wire aliases, see "Tool-name wire aliasing")
     │
     ├─ POST /v1/chat/completions  (stream + thinking + tools)
     │
@@ -24,7 +24,7 @@ DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, op
          │  parse SSE chunks
          ├─ delta.reasoning_content      → ctx.reasoning += chunk, emit ThinkingPart if available
          ├─ delta.content                → emit LanguageModelTextPart
-         ├─ delta.tool_calls             → ctx.toolCallBuffers, emit LanguageModelToolCallPart once JSON args are valid
+         ├─ delta.tool_calls             → ctx.toolCallBuffers, emit LanguageModelToolCallPart once JSON args are valid (echoed wire alias mapped back to the host name)
          └─ finish_reason / [DONE]       → see "Finish reasons" below for the dispatch table
 ```
 
@@ -40,7 +40,10 @@ Every invocation of `provideLanguageModelChatResponse` constructs a fresh
 - `reasoning` — accumulated `reasoning_content` for this turn, fingerprinted
   and persisted at finish time
 - `emittedText` / `emittedToolCalls` — what we sent to the host this turn,
-  used to compute the cache fingerprint
+  used to compute the cache fingerprint (`emittedToolCalls` stores **wire**
+  names — see "Tool-name wire aliasing" below)
+- `wireNameToHost` — per-request reverse map from advertised wire aliases
+  back to VS Code host tool names
 - `hasShownThinkingHint` — once-per-turn flag for the `💭 Thinking...`
   text fallback when the proposed `LanguageModelThinkingPart` API isn't
   available
@@ -50,6 +53,61 @@ provider, which assumed VS Code calls `provideLanguageModelChatResponse`
 strictly serially. With multi-window / multi-chat-panel scenarios that
 assumption is fragile; encapsulating in `StreamContext` lets concurrent
 turns coexist without trampling each other's tool-call buffers.
+
+## Tool-name wire aliasing (issue #20)
+
+DeepSeek only accepts function names matching `^[A-Za-z0-9_-]{1,64}$`.
+VS Code's MCP prefixing routinely violates the length cap — PyLance
+v2026.3.1's `pylanceCheckSignatureCompatibility` arrives as the 72-char
+`activate_fallback_mcp_pylance_mcp_s_pylanceCheckSignatureCompatibility_1`.
+Two earlier strategies both failed:
+
+- **Silent rewriting** (upstream fork): the model echoes the rewritten name,
+  which matches nothing in VS Code's tool registry — the call routes nowhere.
+- **Hard rejection** (0.3.6–0.3.8 `validateTools`): one bad name in
+  `options.tools` crashed the whole request. Since Copilot advertises every
+  registered tool on every request, one over-long MCP tool name made chat
+  entirely unusable (issue #20).
+
+Current design (`src/tool_names.ts`): `toWireName(hostName)` deterministically
+aliases each name onto the spec —
+
+- spec-legal names pass through **unchanged** (the common case; aliasing is
+  invisible unless a name actually violates the spec);
+- illegal characters become `_`, and **every alias that differs from the host
+  name carries `_fnv1a32(original)`** — bare sanitization is lossy:
+  `weather.get` would emerge as `weather_get` and collide with a legitimate
+  sibling tool literally named `weather_get`, and equal-length CJK names
+  would all collapse to the same underscore run, silently dropping real
+  tools via the first-wins collision guard;
+- names too long for `sanitized + "_" + hash` compress to `head(22) + "_" +
+  tail(32) + "_" + hash` — exactly 64. The tail gets the larger share because
+  MCP prefixes are templated noise while the discriminating semantics sit at
+  the end; the hash keeps middle-differing siblings distinct.
+
+The function is pure and idempotent, so both sides of every round-trip agree
+without shared state:
+
+- **outbound** — `convertTools` advertises wire names; `convertMessages`
+  re-aliases host names in history `tool_calls`; `tool_choice` uses the
+  advertised wire name;
+- **inbound** — the stream layer maps the echoed wire name back to the host
+  name via `ctx.wireNameToHost` (built per request by `buildWireNameMap`,
+  first-wins on the astronomically-rare hash collision, with the colliding
+  tool dropped from the advertised set) before `progress.report`, so VS Code
+  dispatches on the names it registered. Unknown echoed names pass through
+  unchanged — same failure mode as a hallucinated tool name before aliasing;
+- **fingerprints** — `ctx.emittedToolCalls` records `toWireName(part.name)`,
+  keeping the write-side fingerprint keyed identically to the read-side one
+  computed over `convertMessages` output. Keying the two sides on different
+  name spaces would make every aliased tool call a guaranteed cache miss —
+  issue #19's failure mode all over again.
+
+Unusable names (empty after sanitization) skip just that tool with a
+`console.error`, never the whole request. Frozen-literal coverage in
+`test/unit_tool_wire_name.mjs` pins the algorithm: changing the head/tail
+split or hash breaks fingerprint continuity for conversations that span
+extension versions, so it must be a deliberate, versioned decision.
 
 ## Finish reasons
 
@@ -130,7 +188,9 @@ the host `progress` callback also accumulates:
 - `ctx.emittedText`: every text part we emitted to the UI this turn (used
   as the fallback fingerprint when no tool calls)
 - `ctx.emittedToolCalls`: every `{id, name}` we emitted (the primary
-  fingerprint anchor when present)
+  fingerprint anchor when present; `name` is the **wire alias**, matching
+  what the read side computes over `convertMessages` output — see
+  "Tool-name wire aliasing")
 
 `persistReasoningForTurn(ctx)` then computes a fingerprint, writes the
 entry to the LRU `_reasoningCache`, and persists to `globalState`
@@ -196,7 +256,7 @@ function fingerprintAssistantTurn(input: { text: string; toolCalls: ... }): stri
 
 Key points:
 
-- **Has tool_calls** → `tc:` prefix, anchored on DeepSeek's immutable id strings.
+- **Has tool_calls** → `tc:` prefix, anchored on DeepSeek's immutable id strings. `tc.name` is the **wire alias** on both sides (write side records `toWireName(part.name)`; read side runs over `convertMessages` output, which is already aliased).
 - **No tool_calls** → `tx:` prefix, hash of NFKC-normalized visible text. VS Code stores the `LanguageModelTextPart`s we emit verbatim, so the text round-trips reliably.
 - The prefix prevents collisions between the two modes.
 - NFKC normalization absorbs emoji / CJK encoding variants.
