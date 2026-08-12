@@ -12,6 +12,7 @@ import {
 import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
+import { toWireName, buildWireNameMap } from "./tool_names";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 import { ContextUsageService } from "./context_usage_service";
@@ -417,6 +418,13 @@ class StreamContext {
 	emittedText = "";
 	/** Tool calls emitted this turn — primary fingerprint anchor when present. */
 	readonly emittedToolCalls: Array<{ id: string; name: string }> = [];
+	/**
+	 * wire→host tool-name reverse map for THIS request's advertised tools
+	 * (issue #20). The API only ever sees deterministic spec-legal aliases;
+	 * echoed tool_calls are mapped back through this before reporting so
+	 * VS Code's tool registry dispatches on the names it registered.
+	 */
+	wireNameToHost: Map<string, string> = new Map();
 	/** Whether we've already shown the "💭 Thinking..." text fallback this turn. */
 	hasShownThinkingHint = false;
 }
@@ -1202,7 +1210,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					} else if (part instanceof vscode.LanguageModelToolCallPart) {
 						ctx.emittedToolCalls.push({
 							id: part.callId,
-							name: part.name,
+							// Fingerprint on the WIRE name, not the host name the
+							// part carries: the get-side fingerprint
+							// (attachReasoningToHistory) runs over convertMessages
+							// output, which aliases names via toWireName. Keying
+							// the set side on host names would make every aliased
+							// tool call a guaranteed cache miss on the next
+							// request — reasoning loss + broken prompt-cache
+							// prefix (issue #19's failure mode).
+							name: toWireName(part.name),
 						});
 					}
 					progress.report(part);
@@ -1280,6 +1296,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			validateRequest(messages);
 
             const toolConfig = convertTools(options);
+            // Reverse map for THIS request's tool set (first-wins on the
+            // astronomically-rare wire-name collision, mirroring the
+            // advertise-side skip in convertTools).
+            ctx.wireNameToHost = buildWireNameMap((options.tools ?? []).map((t) => t?.name));
 
         if (options.tools && options.tools.length > 128) {
             throw new Error("Cannot have more than 128 tools per request.");
@@ -2026,7 +2046,12 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             return;
         }
         const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
-        progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, canParse.value));
+        // The model echoes the wire alias; report the HOST name so VS Code's
+        // tool registry can dispatch (issue #20). Names not in the map
+        // (model hallucination) pass through unchanged — the same failure
+        // mode that existed before aliasing.
+        const hostName = ctx.wireNameToHost.get(buf.name) ?? buf.name;
+        progress.report(new vscode.LanguageModelToolCallPart(id, hostName, canParse.value));
         ctx.toolCallBuffers.delete(index);
         ctx.completedToolCallIndices.add(index);
     }
@@ -2057,7 +2082,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             }
             const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
             const name = buf.name ?? "unknown_tool";
-            progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
+            // Same wire→host reverse mapping as tryEmitBufferedToolCall.
+            const hostName = ctx.wireNameToHost.get(name) ?? name;
+            progress.report(new vscode.LanguageModelToolCallPart(id, hostName, parsed.value));
             ctx.toolCallBuffers.delete(idx);
             ctx.completedToolCallIndices.add(idx);
         }

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { OpenAIChatMessage, OpenAIChatRole, OpenAIFunctionToolDef, OpenAIToolCall } from "./types";
-import { isValidToolName } from "./tool_names";
+import { toWireName, buildWireNameMap } from "./tool_names";
 import { resolveToolChoice, type ToolChoice } from "./tool_choice";
 
 // Tool calling sanitization helpers
@@ -26,7 +26,7 @@ function isIntegerLikePropertyName(propertyName: string | undefined): boolean {
     return integerMarkers.some((m) => lowered.includes(m)) || lowered.endsWith("_id");
 }
 
-// `sanitizeFunctionName` and `isValidToolName` moved to `./tool_names.ts`
+// Tool-name validation and wire-aliasing live in `./tool_names.ts`
 // (pure, vscode-free) so unit tests can import them via Node ESM without
 // a VS Code mock. Re-imported above for in-file usage.
 
@@ -153,7 +153,11 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
 				} catch {
 					args = "{}";
 				}
-				toolCalls.push({ id, type: "function", function: { name: part.name, arguments: args } });
+				// History tool calls carry HOST names (the reverse-mapped names
+				// we reported to VS Code); re-alias them so the API sees the
+				// same wire name it saw when it issued the call. toWireName is
+				// pure, so this round-trips identically across requests.
+				toolCalls.push({ id, type: "function", function: { name: toWireName(part.name), arguments: args } });
 			} else if (isToolResultPart(part)) {
 				const callId = (part as { callId?: string }).callId ?? "";
 				const content = collectToolResultText(part as { content?: ReadonlyArray<unknown> });
@@ -192,59 +196,65 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
 		return {};
 	}
 
-	// Reject names that don't match DeepSeek's spec
-	// (^[A-Za-z0-9_-]{1,64}$). Sending a name like `weather.get` would
-	// previously have been silently rewritten to `weather_get`; the
-	// model's echoed tool_call would not match VS Code's host registry
-	// and the call would route nowhere. Refusing the request upfront
-	// with a clear message is better than a silent black hole.
-	validateTools(tools);
+	// Every name is deterministically aliased onto DeepSeek's spec
+	// (^[A-Za-z0-9_-]{1,64}$) by toWireName — spec-legal names pass through
+	// untouched. The stream layer reverse-maps the model's echoed alias back
+	// to the host name before reporting (provider.ts), so aliasing is
+	// invisible to VS Code's tool registry. Earlier revisions hard-threw on
+	// the first illegal name instead, which turned one over-long MCP tool
+	// name into a total chat outage (issue #20).
+	const wireToHost = buildWireNameMap(tools.map((t) => t?.name));
 
-	const toolDefs: OpenAIFunctionToolDef[] = tools
-		.filter((t) => t && typeof t === "object")
-		.map((t) => {
-			const description = typeof t.description === "string" ? t.description : "";
-			const params = sanitizeSchema(t.inputSchema ?? { type: "object", properties: {} });
-			return {
-				type: "function" as const,
-				function: {
-					name: t.name,
-					description,
-					parameters: params,
-				},
-			} satisfies OpenAIFunctionToolDef;
-		});
+	const toolDefs: OpenAIFunctionToolDef[] = [];
+	for (const t of tools) {
+		if (!t || typeof t !== "object") {
+			continue;
+		}
+		const wire = typeof t.name === "string" ? toWireName(t.name) : "";
+		// The typeof guard must be explicit: for `t.name === undefined`,
+		// `wireToHost.get("")` is ALSO undefined, so the membership check
+		// alone would pass (`undefined !== undefined` → false) and advertise
+		// an empty function name — a guaranteed API 400 that kills the whole
+		// request, the exact failure class this aliasing layer exists to
+		// eliminate.
+		if (typeof t.name !== "string" || wireToHost.get(wire) !== t.name) {
+			// Unusable name (empty / non-string) or wire-name collision with
+			// an earlier tool — advertising it would let the model call a
+			// name that dispatches to the wrong tool. Skip just this tool;
+			// the rest of the request proceeds.
+			console.error("[DeepSeek V4] Skipping tool with unusable or colliding name", {
+				name: t.name,
+				wire,
+				collidesWith: wireToHost.get(wire),
+			});
+			continue;
+		}
+		const description = typeof t.description === "string" ? t.description : "";
+		const params = sanitizeSchema(t.inputSchema ?? { type: "object", properties: {} });
+		toolDefs.push({
+			type: "function" as const,
+			function: {
+				name: wire,
+				description,
+				parameters: params,
+			},
+		} satisfies OpenAIFunctionToolDef);
+	}
+
+	if (toolDefs.length === 0) {
+		return {};
+	}
 
 	// Resolution lives in `tool_choice.ts` (vscode-free, unit-tested).
+	// Count and name refer to the ADVERTISED (wire) tool set — a forced
+	// named-function tool_choice must match a name the API was given.
 	const tool_choice = resolveToolChoice(
 		options.toolMode === vscode.LanguageModelChatToolMode.Required,
-		tools.length,
-		tools[0]?.name,
+		toolDefs.length,
+		toolDefs[0]?.function.name,
 	);
 
 	return { tools: toolDefs, tool_choice };
-}
-
-/**
- * Validate tool names against the OpenAI/DeepSeek function-name spec.
- * Throws synchronously on the first illegal name with a message
- * showing exactly which characters or length constraint failed, so
- * the user (or upstream tool author) can see what to fix.
- *
- * @param tools Tools to validate.
- */
-export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): void {
-	for (const tool of tools) {
-		if (!isValidToolName(tool.name)) {
-            console.error("[DeepSeek V4] Invalid tool name detected:", { name: tool.name });
-            throw new Error(
-                `Invalid tool name "${tool.name}": DeepSeek requires names matching ` +
-                `/^[A-Za-z0-9_-]{1,64}$/ — letters, digits, underscores or dashes, ` +
-                `length 1 to 64. The model's echoed tool name must match what we ` +
-                `send, so we cannot silently rewrite it.`
-            );
-		}
-	}
 }
 
 /**

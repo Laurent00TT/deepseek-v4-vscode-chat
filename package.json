@@ -150,7 +150,7 @@
 		"prepare-icon": "node scripts/prepare-icon.mjs",
 		"pretest": "npm run compile",
 		"test": "npm run test:unit",
-		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_tool_name_validation.mjs && node test/unit_context_usage.mjs && node test/unit_tool_choice.mjs && node test/unit_request_kind.mjs && node test/unit_reasoning_cache.mjs"
+		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_tool_name_validation.mjs && node test/unit_tool_wire_name.mjs && node test/unit_context_usage.mjs && node test/unit_tool_choice.mjs && node test/unit_request_kind.mjs && node test/unit_reasoning_cache.mjs"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",
