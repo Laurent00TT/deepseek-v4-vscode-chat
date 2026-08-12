@@ -13,6 +13,7 @@ import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 import { toWireName, buildWireNameMap } from "./tool_names";
+import { assertAdvertisedToolLimit } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 import { ContextUsageService } from "./context_usage_service";
@@ -1301,9 +1302,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             // advertise-side skip in convertTools).
             ctx.wireNameToHost = buildWireNameMap((options.tools ?? []).map((t) => t?.name));
 
-        if (options.tools && options.tools.length > 128) {
-            throw new Error("Cannot have more than 128 tools per request.");
-        }
+            // The cap counts the ADVERTISED set, not options.tools — since
+            // the issue #20 wire-aliasing fix, tool assembly may skip
+            // unusable/colliding tools, so the host list can be over 128
+            // while the set actually broadcast to the API is legal. The
+            // guard's parameter type makes feeding the host list a compile
+            // error; see tool_limit.ts.
+            assertAdvertisedToolLimit(toolConfig.tools);
 
             const messageChars = this.countMessageChars(messages);
             const toolChars = this.countToolChars(toolConfig.tools);

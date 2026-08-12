@@ -5,6 +5,20 @@ All notable changes to this project will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The 128-tools-per-request cap now counts the tools actually sent to the API, not the raw host list.** The pre-request guard in `provideLanguageModelChatResponse` counted `options.tools`, but since the issue #20 wire-aliasing fix tool assembly may skip unusable or colliding tools — so a host list slightly over 128 whose broadcast set is back under the cap was rejected for a violation that never reached the wire. The guard (`assertAdvertisedToolLimit` in `src/tool_limit.ts`) takes the advertised `OpenAIFunctionToolDef[]` itself, not a count: VS Code's host tool shape is structurally incompatible, so re-feeding `options.tools` (or any hand-computed number) is a compile error. One deliberate edge: a host list of **any** size whose tools are all unusable now proceeds as a tool-less request (each skip individually logged) instead of throwing the old — and factually wrong — "more than 128 tools" error; this matches what already happened for the same input at ≤128 tools.
+
+### Changed
+
+- **Tool payload assembly extracted to the vscode-free `src/tool_payload.ts`** (`buildToolPayload`: schema sanitization, wire-alias skip logic, tool_choice resolution — moved verbatim from `utils.ts`), leaving `convertTools` as a thin enum→boolean adapter. Third instance of the `tool_names.ts` / `tool_choice.ts` extraction pattern; done so the unit harness can execute the real skip-then-count path instead of asserting about it textually.
+
+### Added
+
+- **`test/unit_tool_limit.mjs`** — pins the cap constant, the guard boundary (128 passes, 129 throws), and the real regression scenario end to end: 130 host tools with 5 unusable names advertise 125 defs and pass, 129 usable defs throw, all-unusable lists advertise nothing, and every skip logs exactly one diagnostic line. A deliberately minimal best-effort text pin over comment-stripped `out/provider.js` guards the two properties the type system can't: the guard call exists in provider.ts, and no inline host-list count check has crept back.
+
 ## [0.3.9] - 2026-08-12
 
 ### Fixed
