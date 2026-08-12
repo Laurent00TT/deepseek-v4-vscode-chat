@@ -424,7 +424,7 @@ class StreamContext {
 	 * echoed tool_calls are mapped back through this before reporting so
 	 * VS Code's tool registry dispatches on the names it registered.
 	 */
-	wireNameToHost: Map<string, string> = new Map();
+	wireNameToHost = new Map<string, string>();
 	/** Whether we've already shown the "💭 Thinking..." text fallback this turn. */
 	hasShownThinkingHint = false;
 }
