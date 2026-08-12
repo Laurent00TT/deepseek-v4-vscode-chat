@@ -109,6 +109,22 @@ Unusable names (empty after sanitization) skip just that tool with a
 split or hash breaks fingerprint continuity for conversations that span
 extension versions, so it must be a deliberate, versioned decision.
 
+Because tools can be skipped, DeepSeek's 128-tools-per-request cap is
+enforced against the **advertised** set, not `options.tools` — a host list
+slightly over 128 whose skips bring the broadcast set back under the cap is
+a legal request. The payload assembly itself (schema sanitization, skip
+logic, tool_choice) lives in the vscode-free `src/tool_payload.ts` — the
+third extraction after `tool_names.ts` and `tool_choice.ts`, with
+`convertTools` reduced to a thin enum→boolean adapter — so
+`test/unit_tool_limit.mjs` executes the real skip-then-count path (130 host
+tools, 5 unusable → 125 advertised → guard passes). The guard
+(`src/tool_limit.ts`) takes the advertised `OpenAIFunctionToolDef[]` rather
+than a count: VS Code's host tool shape is structurally incompatible, so
+feeding `options.tools` — or any hand-computed number — fails to compile. A
+deliberately minimal, best-effort text pin over comment-stripped
+`out/provider.js` covers the two properties types can't enforce: the guard
+call exists, and no inline host-list count check has crept back.
+
 ## Finish reasons
 
 DeepSeek can return five `finish_reason` values, including special ones
