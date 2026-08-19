@@ -731,8 +731,8 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		const tzOffset = -now.getTimezoneOffset();
 		const row = (active: boolean, label: string, windows: string) =>
 			`${active ? "$(circle-filled)" : "$(circle-outline)"} ${active ? `**${label}**` : label} &nbsp;&nbsp; ${windows}\n\n`;
-		md.appendMarkdown(row(peakNow, "Peak", formatWindowsLocal(PEAK_WINDOWS_UTC, tzOffset)));
-		md.appendMarkdown(row(!peakNow, "Off-peak", formatWindowsLocal(offPeakWindowsUtc(), tzOffset)));
+		md.appendMarkdown(row(peakNow, "Peak/高峰", formatWindowsLocal(PEAK_WINDOWS_UTC, tzOffset)));
+		md.appendMarkdown(row(!peakNow, "Off-peak/非高峰", formatWindowsLocal(offPeakWindowsUtc(), tzOffset)));
 		md.appendMarkdown("---\n\n");
 
 		md.appendMarkdown("### DeepSeek V4\n\n");
