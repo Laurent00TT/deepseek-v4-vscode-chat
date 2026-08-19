@@ -12,7 +12,7 @@
 // Exits 0 on all-pass, 1 on any failure.
 
 import process from "node:process";
-import { isPeakTime, nextBoundary, PEAK_WINDOWS_UTC } from "../out/off_peak.js";
+import { isPeakTime, nextBoundary, offPeakWindowsUtc, formatWindowsLocal, PEAK_WINDOWS_UTC } from "../out/off_peak.js";
 
 const failures = [];
 
@@ -79,7 +79,39 @@ for (const [, iso] of boundaryCases) {
 	check(`nextBoundary(${iso}) within 24h`, delta <= 24 * 60 * 60_000, true);
 }
 
-const total = peakCases.length + boundaryCases.length + PEAK_WINDOWS_UTC.length * 2 + boundaryCases.length * 2;
+// === offPeakWindowsUtc: ring complement of the peak windows ===
+check(
+	"offPeakWindowsUtc shape (gaps incl. the midnight wrap)",
+	JSON.stringify(offPeakWindowsUtc()),
+	JSON.stringify([
+		[240, 360],
+		[600, 1500],
+	]),
+);
+{
+	// The two lists partition the day — the tooltip renders both, so a
+	// drifted complement would show overlapping or missing hours.
+	const peakLen = PEAK_WINDOWS_UTC.reduce((n, [s, e]) => n + (e - s), 0);
+	const offLen = offPeakWindowsUtc().reduce((n, [s, e]) => n + (e - s), 0);
+	check("peak + off-peak windows cover the full 24h ring", peakLen + offLen, 24 * 60);
+}
+
+// === formatWindowsLocal: local wall-clock rendering, sorted by local start ===
+const fmtCases = [
+	["peak @ UTC+0", PEAK_WINDOWS_UTC, 0, "01:00–04:00 · 06:00–10:00"],
+	["off-peak @ UTC+0 (midnight wrap renders as-is)", offPeakWindowsUtc(), 0, "04:00–06:00 · 10:00–01:00"],
+	["peak @ UTC+8 (CST)", PEAK_WINDOWS_UTC, 480, "09:00–12:00 · 14:00–18:00"],
+	["off-peak @ UTC+8 (overnight range)", offPeakWindowsUtc(), 480, "12:00–14:00 · 18:00–09:00"],
+	["peak @ UTC-5 re-sorts by local start", PEAK_WINDOWS_UTC, -300, "01:00–05:00 · 20:00–23:00"],
+	["off-peak @ UTC-5 re-sorts, wrap range last", offPeakWindowsUtc(), -300, "05:00–20:00 · 23:00–01:00"],
+	["peak @ UTC+5:30 keeps half-hour minutes", PEAK_WINDOWS_UTC, 330, "06:30–09:30 · 11:30–15:30"],
+];
+for (const [label, windows, offset, expected] of fmtCases) {
+	check(`formatWindowsLocal ${label}`, formatWindowsLocal(windows, offset), expected);
+}
+
+const total =
+	peakCases.length + boundaryCases.length + PEAK_WINDOWS_UTC.length * 2 + boundaryCases.length * 2 + 2 + fmtCases.length;
 if (failures.length > 0) {
 	console.error(`unit_off_peak: ${failures.length}/${total} FAILED`);
 	console.error(failures.join("\n"));
