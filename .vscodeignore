@@ -23,6 +23,7 @@ eslint.config.mjs
 .github/**
 .gitignore
 docs/**
+.claude/**
 
 # Build artifacts kept out of the package
 **/*.map
