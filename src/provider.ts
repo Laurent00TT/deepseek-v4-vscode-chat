@@ -758,7 +758,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		md.appendMarkdown(
 			isPeakTime(now)
 				? `$(flame) **Peak pricing** &nbsp;·&nbsp; off-peak starts ${flipAt}\n\n`
-				: `$(clock) Off-peak pricing &nbsp;·&nbsp; until ${flipAt}\n\n`,
+				: `$(check) Off-peak pricing &nbsp;·&nbsp; until ${flipAt}\n\n`,
 		);
 
 		md.appendMarkdown("---\n\n");
