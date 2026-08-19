@@ -5,7 +5,11 @@ All notable changes to this project will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.11] - 2026-08-19
+
+### Fixed
+
+- **Stray `.claude/` worktree directories no longer get bundled into the VSIX.** vsce packs everything not blacklisted in `.vscodeignore`, so a leftover Claude worktree under `.claude/worktrees/` silently ballooned a local build from ~110 KB to 885 KB (81 stray files, including a stale `.vsix`). The directory is now excluded wholesale.
 
 ### Added
 
