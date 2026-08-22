@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<!-- Two release-ready groups below: "Vision" can ship alone as 0.4.0 (cut at
-     the vision commit); the engineering-series entries can follow as 0.4.1+. -->
+## [0.4.0] - 2026-08-22
 
 ### Added
 
