@@ -2,8 +2,8 @@
 // (hit / miss → "" / non-thinking strip / stats gating), persistReasoningForTurn
 // anchors (tc: / tx:, wire names), and cross-instance restore from globalState.
 import { createRequire } from "node:module";
-import { check, checkDeep, checkMatch, summary } from "./helpers/check.mjs";
-import { OUT, shim, makeProvider, runTurn, model, userText, assistantText, assistantToolCallMsg, toolResultMsg, reasoningChunk, contentChunk, toolCallChunk, finishChunk, usageChunk, DONE, sleep } from "./helpers/fakes.mjs";
+import { check, checkDeep, checkMatch, summary, until } from "./helpers/check.mjs";
+import { OUT, shim, makeProvider, runTurn, model, userText, assistantText, assistantToolCallMsg, toolResultMsg, reasoningChunk, contentChunk, toolCallChunk, finishChunk, usageChunk, DONE } from "./helpers/fakes.mjs";
 
 const require = createRequire(import.meta.url);
 const { fingerprintAssistantTurn } = require(OUT("reasoning_cache.js"));
@@ -64,10 +64,11 @@ async function main() {
 		const stats = provider.attachReasoningToHistory(next, true);
 		check("next turn: tool-call turn hits", stats.hits, 1);
 		check("…with the streamed reasoning", next[1].reasoning_content, "Think harder.");
-		// Persistence: debounced 200ms write to globalState.
-		await sleep(300);
-		const saved = memento.get("deepseekv4.reasoningCache");
-		check("cache persisted to globalState under the frozen key", Array.isArray(saved) && saved.some((e) => e.fingerprint === fp), true);
+		// Persistence: debounced write to globalState. Poll for the entry rather
+		// than sleeping past the debounce — no tuned delay, no race.
+		const persisted = await until(() => (memento.get("deepseekv4.reasoningCache") ?? []).some((e) => e.fingerprint === fp));
+		check("cache persisted to globalState under the frozen key", persisted, true);
+		check("…as an array of entries", Array.isArray(memento.get("deepseekv4.reasoningCache")), true);
 		provider.dispose();
 
 		// Cross-instance restore (simulates VS Code restart / extension upgrade).

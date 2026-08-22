@@ -4,8 +4,8 @@
 // [DONE] flush, cancellation (reader.cancel + finally persist), and the
 // mid-stream throw that still persists reasoning.
 import { createRequire } from "node:module";
-import { check, checkMatch, summary } from "./helpers/check.mjs";
-import { vscode, OUT, shim, makeProvider, runTurn, model, userText, cancellation, progressCollector, onFetch, sseResponse, hangingStream, reasoningChunk, contentChunk, toolCallChunk, finishChunk, usageChunk, DONE, tick, sleep } from "./helpers/fakes.mjs";
+import { check, checkMatch, summary, withConsole } from "./helpers/check.mjs";
+import { vscode, OUT, shim, makeProvider, runTurn, cancellation, progressCollector, sseResponse, hangingStream, reasoningChunk, contentChunk, toolCallChunk, finishChunk, usageChunk, DONE, tick } from "./helpers/fakes.mjs";
 
 const require = createRequire(import.meta.url);
 const { fingerprintAssistantTurn } = require(OUT("reasoning_cache.js"));
@@ -68,13 +68,20 @@ async function main() {
 		const tools = [{ name: "get_weather", description: "d", inputSchema: { type: "object", properties: {} } }];
 		const t = await runTurn(provider, {
 			options: { tools },
-			chunks: [toolCallChunk(0, { id: "call_1", name: "get_weather", args: '{"ci' }), toolCallChunk(0, { args: 'ty":"Tokyo"}' }), toolCallChunk(1, { id: "call_2", name: "get_weather", args: "{}" }), finishChunk("tool_calls"), DONE],
+			// "after" sits between the chunk that COMPLETES call_1's JSON and the
+			// call_2 chunk, so the order of parts pins early emit: call_1 must
+			// reach the host as soon as its arguments parse, not at flush time.
+			chunks: [toolCallChunk(0, { id: "call_1", name: "get_weather", args: '{"ci' }), toolCallChunk(0, { args: 'ty":"Tokyo"}' }), contentChunk("after"), toolCallChunk(1, { id: "call_2", name: "get_weather", args: "{}" }), finishChunk("tool_calls"), DONE],
 		});
 		check("no error", t.error, undefined);
 		const calls = t.progress.toolCalls();
 		check("two tool calls reported", calls.length, 2);
 		check("args assembled across deltas", JSON.stringify(calls[0].input), '{"city":"Tokyo"}');
 		check("ids preserved", calls.map((c) => c.callId).join(","), "call_1,call_2");
+		const firstCallAt = t.progress.parts.findIndex((p) => p instanceof vscode.LanguageModelToolCallPart);
+		const afterTextAt = t.progress.parts.findIndex((p) => p instanceof vscode.LanguageModelTextPart && p.value === "after");
+		check("the 'after' text really was reported", afterTextAt >= 0, true);
+		check("early emit: call_1 reaches the host BEFORE the text that follows it", firstCallAt >= 0 && firstCallAt < afterTextAt, true);
 		provider.dispose();
 	}
 	// --- non-clean finish: insufficient_system_resource → error toast with Show Log ---
@@ -119,13 +126,12 @@ async function main() {
 		// console.error("[DeepSeek V4] Chat request failed", ...) again before rethrowing.
 		// Both are real, expected CURRENT behaviour — not test bugs — so console.error
 		// is captured around just this block to keep the suite's own output pristine.
-		const realConsoleError = console.error;
-		const consoleErrors = [];
-		console.error = (...args) => consoleErrors.push(args);
-		const t = await runTurn(provider, { options: { tools: [{ name: "t" }] }, chunks: [reasoningChunk("R-mid"), contentChunk("Some text"), toolCallChunk(0, { id: "c", name: "t", args: "{invalid" }), finishChunk("stop"), DONE] });
-		console.error = realConsoleError;
+		const captured = await withConsole("error", () =>
+			runTurn(provider, { options: { tools: [{ name: "t" }] }, chunks: [reasoningChunk("R-mid"), contentChunk("Some text"), toolCallChunk(0, { id: "c", name: "t", args: "{invalid" }), finishChunk("stop"), DONE] }),
+		);
+		const t = captured.result;
 		checkMatch("clean finish + invalid JSON throws", t.error?.message, /Invalid JSON for tool call/);
-		check("both expected console.error calls captured (invalid JSON + outer catch)", consoleErrors.length, 2);
+		check("both expected console.error calls captured (invalid JSON + outer catch)", captured.lines.length, 2);
 		// CORRECTED: same 💭-hint-prefix reasoning as the first scenario — the
 		// reasoningChunk before "Some text" triggers the fallback hint (no
 		// ThinkingPart host), and that hint text is part of ctx.emittedText,
@@ -139,10 +145,19 @@ async function main() {
 		const { provider } = makeProvider();
 		const { stream, state } = hangingStream([reasoningChunk("R-cancel"), contentChunk("Partial answer")]);
 		const c = cancellation();
-		const turn = runTurn(provider, { response: sseResponse(stream), cancellation: c });
-		await sleep(50); // let the two chunks flow
-		c.cancel();
-		const t = await turn;
+		// Cancel the instant the partial text reaches the host — event-driven, so
+		// there is no sleep to tune and no race if the stream runs slow.
+		const base = progressCollector();
+		const progress = {
+			...base,
+			report: (p) => {
+				base.report(p);
+				if (p instanceof vscode.LanguageModelTextPart && p.value === "Partial answer") {
+					c.cancel();
+				}
+			},
+		};
+		const t = await runTurn(provider, { response: sseResponse(stream), cancellation: c, progress });
 		check("cancelled turn resolves without throwing", t.error, undefined);
 		check("reader.cancel reached the underlying stream", state.cancelled, true);
 		check("partial text was emitted before cancel", t.progress.texts().includes("Partial answer"), true);

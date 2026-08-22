@@ -145,9 +145,22 @@ export function stubFetch() {
 		throw new Error(`fakes.stubFetch: unexpected fetch ${init?.method ?? "GET"} ${u}`);
 	};
 }
-/** Add a route; `matcher(url, init)` → boolean; `handler(url, init)` → Response. Newest route wins. */
+/**
+ * Add a route; `matcher(url, init)` → boolean; `handler(url, init)` → Response.
+ * Newest route wins. Returns a disposer that removes just this route, so
+ * per-turn routes don't accumulate across scenarios.
+ */
 export function onFetch(matcher, handler) {
-	routes.unshift({ matcher, handler });
+	const route = { matcher, handler };
+	routes.unshift(route);
+	return () => offFetch(route);
+}
+/** Remove one route previously added by `onFetch`. */
+export function offFetch(route) {
+	const i = routes.indexOf(route);
+	if (i >= 0) {
+		routes.splice(i, 1);
+	}
 }
 export function resetFetch() {
 	routes.length = 0;
@@ -236,11 +249,14 @@ export function model(id) {
 /**
  * Run one provideLanguageModelChatResponse turn against a stubbed
  * /chat/completions. `opts.response` is a Response (default: SSE from
- * `opts.chunks`). Returns captured request + progress + error.
+ * `opts.chunks`); `opts.progress` supplies a custom collector (default:
+ * `progressCollector()`) for scenarios that need to act on parts as they
+ * are reported. The turn's route is removed when it finishes.
+ * Returns captured request + progress + error.
  */
 export async function runTurn(provider, opts) {
 	const captured = {};
-	onFetch(
+	const offRoute = onFetch(
 		(u, init) => u.endsWith("/chat/completions") && init?.method === "POST",
 		(u, init) => {
 			captured.url = u;
@@ -249,7 +265,7 @@ export async function runTurn(provider, opts) {
 			return opts.response ?? sseResponse(opts.chunks ?? [DONE]);
 		},
 	);
-	const progress = progressCollector();
+	const progress = opts.progress ?? progressCollector();
 	const { token } = opts.cancellation ?? cancellation();
 	let error;
 	try {
@@ -262,6 +278,8 @@ export async function runTurn(provider, opts) {
 		);
 	} catch (e) {
 		error = e;
+	} finally {
+		offRoute();
 	}
 	return { captured, progress, error };
 }

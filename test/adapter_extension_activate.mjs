@@ -1,8 +1,8 @@
 // activate(): command registration, provider registration, the Manage flow,
 // first-run welcome, and the Copilot compact bridge.
 import { createRequire } from "node:module";
-import { check, checkDeep, checkMatch, summary } from "./helpers/check.mjs";
-import { shim, OUT, fakeSecrets, fakeMemento, resetFetch, onFetch, jsonResponse, tick, sleep } from "./helpers/fakes.mjs";
+import { check, checkDeep, checkMatch, summary, until } from "./helpers/check.mjs";
+import { shim, OUT, fakeSecrets, fakeMemento, resetFetch, onFetch, jsonResponse, tick } from "./helpers/fakes.mjs";
 
 const require = createRequire(import.meta.url);
 const { activate, deactivate } = require(OUT("extension.js"));
@@ -56,9 +56,9 @@ async function main() {
 		resetFetch();
 		const ctx = makeContext();
 		activate(ctx);
-		await sleep(10);
+		const opened = await until(() => shim.calls.executeCommand.some((c) => c.id === "workbench.action.openWalkthrough"));
 		const open = shim.calls.executeCommand.find((c) => c.id === "workbench.action.openWalkthrough");
-		check("walkthrough opened", !!open, true);
+		check("walkthrough opened", opened, true);
 		check("…with publisher.name#id", open?.args[0], "Laurent00TT.deepseek-v4-vscode-chat#deepseekv4GettingStarted");
 		check("welcomeShown persisted", ctx.globalState.get("deepseekv4.welcomeShown"), true);
 		disposeAll(ctx);
@@ -69,9 +69,10 @@ async function main() {
 		resetFetch();
 		const ctx = makeContext({ secrets: fakeSecrets({ "deepseekv4.apiKey": "sk-existing" }) });
 		activate(ctx);
-		await sleep(10);
+		// The flag write is the last step of the returning-user branch, so waiting
+		// for it also proves the branch ran to completion before we assert the negative.
+		check("welcomeShown persisted anyway", await until(() => ctx.globalState.get("deepseekv4.welcomeShown") === true), true);
 		check("no walkthrough for returning users", shim.calls.executeCommand.some((c) => c.id === "workbench.action.openWalkthrough"), false);
-		check("welcomeShown persisted anyway", ctx.globalState.get("deepseekv4.welcomeShown"), true);
 		disposeAll(ctx);
 	}
 	// --- welcome: already shown → nothing ---
@@ -80,7 +81,10 @@ async function main() {
 		resetFetch();
 		const ctx = makeContext({ globalState: fakeMemento({ "deepseekv4.welcomeShown": true }) });
 		activate(ctx);
-		await sleep(10);
+		// Nothing observable to wait for: the already-shown branch returns at its
+		// first (synchronous) globalState.get, so one turn of the microtask/timer
+		// queue is all the evidence there is. tick() is the honest fallback here.
+		await tick();
 		check("already-shown: no walkthrough", shim.calls.executeCommand.some((c) => c.id === "workbench.action.openWalkthrough"), false);
 		disposeAll(ctx);
 	}

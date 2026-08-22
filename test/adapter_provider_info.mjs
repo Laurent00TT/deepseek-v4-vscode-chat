@@ -1,6 +1,6 @@
 // Picker entries, token counting, and the secret-change reaction.
-import { check, checkDeep, summary } from "./helpers/check.mjs";
-import { vscode, shim, makeProvider, fakeSecrets, cancellation, userText, sleep } from "./helpers/fakes.mjs";
+import { check, checkDeep, summary, until } from "./helpers/check.mjs";
+import { vscode, shim, makeProvider, fakeSecrets, cancellation, userText } from "./helpers/fakes.mjs";
 
 const IDS = ["deepseek-v4-pro::thinking", "deepseek-v4-pro", "deepseek-v4-flash::thinking", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp::thinking", "deepseek-v4-flash-vision-exp"];
 
@@ -49,8 +49,7 @@ async function main() {
 		provider.onDidChangeLanguageModelChatInformation(() => fired++);
 		provider._sessionRequestCount = 5;
 		secrets._emit("deepseekv4.apiKey");
-		await sleep(10);
-		check("onDidChange fired", fired, 1);
+		check("onDidChange fired", await until(() => fired === 1), true);
 		check("session counter reset", provider._sessionRequestCount, 0);
 		check("context usage cleared", provider.contextUsage.getSnapshot(), undefined);
 		secrets._emit("some.other.key");
