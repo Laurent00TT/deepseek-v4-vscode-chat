@@ -370,7 +370,11 @@ Invariants, in decreasing order of importance:
   conversation serializes exactly as before — the server prompt-cache
   prefix and the reasoning-cache fingerprints depend on this.
 - Images ride only on **user** turns. Assistant/system turns and tool
-  results never emit image blocks (DeepSeek's `tool` role is text-only).
+  results never emit image blocks: the Vision guide says images in
+  `system`/`assistant` messages return 400, and Chat Completions documents
+  `tool` content as a plain string (only the Responses API, which we don't
+  use, allows images in tool outputs — `integration_vision_multiturn.mjs`
+  probes what Chat Completions actually does).
 - MIME gate: JPEG/PNG/GIF/WebP (declared MIME, normalized —
   `image/jpg` → `image/jpeg`, parameters stripped). Unsupported images are
   dropped with a `console.warn`, never sent — one bad attachment must not
@@ -388,6 +392,43 @@ Invariants, in decreasing order of importance:
   at **32 MiB** (`MAX_IMAGE_BYTES`, raw bytes): the largest user-turn
   attachment is checked before the body is built, same treatment.
 
+#### Verified against the official docs (2026-08-22)
+
+Every vision fact above was originally taken from search summaries; on
+2026-08-22 they were re-checked against the official pages
+(`api-docs.deepseek.com/guides/vision`, `/guides/files_api`,
+`/quick_start/pricing`, `/quick_start/rate_limit`, `/news/news260821`,
+EN and zh-cn trees). What the docs add beyond what the code already encodes:
+
+- Model id `deepseek-v4-flash-vision-exp` is the only id; thinking is a
+  request parameter on it (`thinking.type`, `reasoning_effort`), not a
+  separate model. 1M context / 384K max output, same as Flash; billed at
+  Flash prices incl. time-of-day windows; "exp" = experimental, no
+  deprecation or GA timeline published.
+- Formats are sniffed from the bytes, not the declared MIME — our MIME gate
+  is a pre-filter. `image_url.detail` (`low`/`high`/`original`/`auto`,
+  default original) exists; we never send it.
+- Limits: 48 MiB request body; 32 MiB per inline image; 600 images per
+  request; 8192 px per side (4096 px when a request carries ≥ 15 images);
+  external URLs ≤ 8192 chars. Per-image token cost is resolution-based
+  (small images upscaled to ~384×384, large ones downscaled to ~800×800
+  pixels), capped at 384 — the ceiling we budget with.
+- Files API exists and is free: `POST/GET/DELETE /files` (purpose
+  `user_data`, 64 MiB per file, expiry 1 h–30 d or permanent), referenced
+  from a user turn as `{ "type": "file", "file_id": "file-api-…" }`. Unused
+  here until `integration_vision_multiturn.mjs` shows whether the re-sent
+  base64 prefix already hits the server prompt cache (the cache page does
+  not mention images either way).
+- The strict rule is official: with `tools` in the request, every prior
+  assistant turn's `reasoning_content` must be passed back or the API
+  returns 400 — the reason attachReasoningToHistory exists.
+- Rate limiting is now a per-model **concurrency** cap (Pro 500 / Flash
+  2500 / Vision 2500 in-flight requests per account → 429). While queued
+  the server streams `: keep-alive` SSE comment lines (non-`data:` lines,
+  ignored by `parseSseData`) and drops the connection if inference has not
+  started after 10 minutes. `Retry-After` is **not** documented anywhere;
+  the 429/503 guidance is "pace your requests" / "retry after a brief wait".
+
 ### Errors and retry
 
 `fetchWithRetry` (in the vscode-free `src/api_client.ts`, together with the
@@ -396,7 +437,7 @@ in `src/model_catalog.ts`) wraps every API call:
 
 - **Retryable**: 5xx, 429, network errors, timeouts
 - **Non-retryable**: 401, 402, 422, 400, and other 4xx — surface them immediately with actionable notifications
-- Exponential backoff 1 s → 2 s, max 3 attempts
+- Exponential backoff 1 s → 2 s, max 3 attempts; a delay-seconds `Retry-After` on 429/5xx raises the wait when present, capped at 10 s (`MAX_RETRY_AFTER_MS`) — opportunistic, since DeepSeek does not document the header — and the sleep is abortable by Cancel
 - Per-attempt timeout of 5 minutes (max-effort thinking can legitimately take 2–3 minutes)
 
 `notifyApiError` then maps each non-retryable status to a specific user

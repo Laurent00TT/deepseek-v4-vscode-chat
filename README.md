@@ -19,7 +19,7 @@ Native DeepSeek V4 (Pro / Flash / Flash Vision) provider for VS Code Copilot Cha
 - Background balance refresh after each chat (debounced, silent)
 - Persistent reasoning cache (survives VS Code restarts)
 - Actionable error notifications for 400 (reasoning) / 401 / 402 / 422 / 429, plus mid-stream `insufficient_system_resource` truncation handling
-- Retry on transient failures (5xx, 429, network jitter)
+- Retry on transient failures (5xx, 429, network jitter), honoring `Retry-After` when the server sends one
 - Adaptive token estimator (EMA-calibrated chars/token from real `usage` data)
 - First-run walkthrough and a "key required" warning state in the picker so the model entries are always discoverable
 
