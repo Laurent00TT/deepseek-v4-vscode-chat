@@ -21,22 +21,28 @@ DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, op
     ├─ POST /v1/chat/completions  (stream + thinking + tools)
     │
     └─ processStreamingResponse(ctx, …)
-         │  parse SSE chunks
+         │  split/classify SSE lines via the pure src/sse.ts (splitSseLines / parseSseData / extractDelta)
          ├─ delta.reasoning_content      → ctx.reasoning += chunk, emit ThinkingPart if available
          ├─ delta.content                → emit LanguageModelTextPart
-         ├─ delta.tool_calls             → ctx.toolCallBuffers, emit LanguageModelToolCallPart once JSON args are valid (echoed wire alias mapped back to the host name)
+         ├─ delta.tool_calls             → ctx.toolCalls (ToolCallAssembler, sse.ts), emit LanguageModelToolCallPart once JSON args are valid (echoed wire alias mapped back to the host name)
          └─ finish_reason / [DONE]       → see "Finish reasons" below for the dispatch table
 ```
+
+The protocol decisions (line splitting, `data: ` prefix, `[DONE]`,
+malformed-line classification, usage capture, tool-call assembly/dedup,
+clean-finish classification) live in the vscode-free `src/sse.ts` and are
+pinned by `test/unit_sse.mjs`; provider.ts keeps the reader loop, the
+TextDecoder streaming state, the cancellation bridge, every
+`progress.report` emission, and the `finally`-path reasoning persist.
 
 ## Per-call state: StreamContext
 
 Every invocation of `provideLanguageModelChatResponse` constructs a fresh
 `StreamContext` carrying:
 
-- `toolCallBuffers` — map keyed by `tool_calls.index`, accumulating partial
-  function name + JSON arguments deltas
-- `completedToolCallIndices` — set of indices already emitted, used to
-  ignore late deltas after a complete tool call has flushed
+- `toolCalls` — a `ToolCallAssembler` (sse.ts): buffers keyed by
+  `tool_calls.index` accumulating partial name/arguments deltas, plus the
+  completed-index set that ignores late deltas after a call has emitted
 - `reasoning` — accumulated `reasoning_content` for this turn, fingerprinted
   and persisted at finish time
 - `emittedText` / `emittedToolCalls` — what we sent to the host this turn,

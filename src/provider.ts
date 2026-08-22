@@ -9,9 +9,17 @@ import {
 	Progress,
 } from "vscode";
 
-import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
+import type { DeepSeekModelVariant, DSUsage, OpenAIChatMessage } from "./types";
 
-import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
+import { convertTools, convertMessages, validateRequest } from "./utils";
+import {
+	splitSseLines,
+	parseSseData,
+	extractDelta,
+	isCleanFinish,
+	ToolCallAssembler,
+	type CompletedToolCall,
+} from "./sse";
 import { IMAGE_TOKENS_PER_IMAGE, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
 import { buildRequestBody, coerceReasoningEffort } from "./request_body";
 import { toWireName, buildWireNameMap } from "./tool_names";
@@ -224,17 +232,10 @@ async function fetchWithRetry(
  *       (we detect the balance jumping up and re-anchor startBalance).
  *
  * Per-turn token counts (prompt_tokens, prompt_cache_hit_tokens, etc.)
- * are still pulled from API `usage` and surfaced in the status bar and
- * tooltip — that part doesn't depend on pricing.
+ * are still pulled from API `usage` (the DSUsage shape in types.ts) and
+ * surfaced in the status bar and tooltip — that part doesn't depend on
+ * pricing.
  */
-
-interface DSUsage {
-	prompt_tokens?: number;
-	prompt_cache_hit_tokens?: number;
-	prompt_cache_miss_tokens?: number;
-	completion_tokens?: number;
-	completion_tokens_details?: { reasoning_tokens?: number };
-}
 
 /** Snapshot of `/user/balance`. Refreshed only on user demand. */
 interface BalanceInfo {
@@ -448,10 +449,9 @@ function formatApiError(status: number, statusText: string, body: string): strin
  * turns can't trample each other's tool-call buffers or reasoning capture.
  */
 class StreamContext {
-	/** Buffer for assembling streamed tool calls by index. */
-	readonly toolCallBuffers = new Map<number, { id?: string; name?: string; args: string }>();
-	/** Indices for which a tool call has been fully emitted. */
-	readonly completedToolCallIndices = new Set<number>();
+	/** Incremental tool-call assembly (buffers + completed-index dedup) —
+	 * the pure state machine lives in sse.ts; this holds one per turn. */
+	readonly toolCalls = new ToolCallAssembler();
 	/** Full reasoning_content for this turn — round-tripped on the next turn. */
 	reasoning = "";
 	/** Visible text emitted this turn — fallback fingerprint when no tool_calls. */
@@ -1774,50 +1774,47 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					break;
 				}
 
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
+				// Line splitting / data-line classification are the pure
+				// splitSseLines / parseSseData in sse.ts (unit-pinned there:
+				// "\n"-only splitting, exact "data: " prefix, exact [DONE],
+				// only-JSON.parse-errors-are-malformed). The decoder keeps its
+				// streaming state here — a multi-byte char split across chunks
+				// must be decoded once, by one decoder.
+				const { lines, rest } = splitSseLines(buffer + decoder.decode(value, { stream: true }));
+				buffer = rest;
 
 				for (const line of lines) {
-					if (!line.startsWith("data: ")) {
+					const data = parseSseData(line);
+					if (data.kind === "not-data") {
 						continue;
 					}
-					const data = line.slice(6);
-					if (data === "[DONE]") {
+					if (data.kind === "done") {
 						// Do not throw on [DONE]; any incomplete/empty buffers are ignored.
-						await this.flushToolCallBuffers(ctx, progress, /*throwOnInvalid*/ false);
+						this.reportToolCalls(ctx, ctx.toolCalls.flush(/*throwOnInvalid*/ false), progress);
 						// Defensive cache write: if no finish_reason was seen but reasoning
 						// was streamed, still persist it. Idempotent — same fingerprint
 						// just overwrites.
 						this.persistReasoningForTurn(ctx);
 						continue;
 					}
-
-					let parsed: Record<string, unknown> | undefined;
-					try {
-						parsed = JSON.parse(data) as Record<string, unknown>;
-					} catch (e) {
-						// Malformed SSE line — log and skip. These come from
-						// DS occasionally (keep-alive lines, server hiccups);
-						// continuing is safe and matches the OpenAI SDK
-						// convention. Critically, we ONLY catch parse errors
-						// here — any error from processDelta (e.g. clean
-						// finish with invalid tool-call JSON) must propagate
-						// up so the host sees the failed turn instead of a
-						// silently-dropped tool call.
-						this.log("sse.parse_error", {
-							snippet: data.slice(0, 200),
-							err: e instanceof Error ? e.message : String(e),
-						});
+					if (data.kind === "malformed") {
+						// Log and skip; see parseSseData for why ONLY parse errors
+						// take this path — errors from acting on a well-formed
+						// chunk (e.g. clean finish with invalid tool-call JSON)
+						// must propagate up so the host sees the failed turn
+						// instead of a silently-dropped tool call.
+						this.log("sse.parse_error", { snippet: data.snippet, err: data.error });
 						continue;
 					}
 					// DS sends a final chunk with `usage` populated when
-					// stream_options.include_usage=true. Capture it before
-					// dispatching so we have token counts for cost reporting.
-					if (parsed.usage && typeof parsed.usage === "object") {
-						lastUsage = parsed.usage as DSUsage;
+					// stream_options.include_usage=true. Captured before — and
+					// independently of — delta dispatch (the usage chunk has an
+					// EMPTY choices array) so token counts always reach the
+					// post-stream accounting.
+					if (data.usage) {
+						lastUsage = data.usage;
 					}
-					await this.processDelta(ctx, parsed, progress);
+					await this.processDelta(ctx, data.parsed, progress);
 				}
 			}
 		} finally {
@@ -1859,6 +1856,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 
 	/**
 	 * Handle a single streamed delta chunk, emitting text and tool call parts.
+	 * Field extraction and tool-call assembly are the pure `extractDelta` /
+	 * `ToolCallAssembler` in sse.ts; everything that touches the host
+	 * (progress parts, ThinkingPart reflection, config reads, dialogs,
+	 * reasoning accumulation) stays here.
 	 * @param ctx Per-call stream state.
 	 * @param delta Parsed SSE chunk from the Router.
 	 * @param progress Progress reporter for parts.
@@ -1867,14 +1868,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		ctx: StreamContext,
 		delta: Record<string, unknown>,
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>
-	): Promise<boolean> {
-		let emitted = false;
-		const choice = (delta.choices as Record<string, unknown>[] | undefined)?.[0];
-		if (!choice) {
-			return false;
+	): Promise<void> {
+		const events = extractDelta(delta);
+		if (!events) {
+			return;
 		}
-
-		const deltaObj = choice.delta as Record<string, unknown> | undefined;
 
 		// DeepSeek streams chain-of-thought as `reasoning_content` interleaved
 		// with `content`. We always accumulate it into the per-turn buffer so
@@ -1884,8 +1882,8 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		// "💭 Thinking..." text hint if the API isn't available.
 		// Either way, the raw reasoning is mirrored live to the OutputChannel
 		// so you can watch the model think in real time.
-		const reasoningChunk = deltaObj?.reasoning_content;
-		if (typeof reasoningChunk === "string" && reasoningChunk.length > 0) {
+		const reasoningChunk = events.reasoning;
+		if (reasoningChunk !== undefined) {
 			const logRawReasoning = vscode.workspace.getConfiguration("deepseekv4").get<boolean>("logRawReasoning", false);
 			if (ctx.reasoning === "" && logRawReasoning) {
 				// First reasoning chunk this turn — mark the section start.
@@ -1905,53 +1903,27 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			if (ThinkingCtor) {
 				try {
 					progress.report(new ThinkingCtor(reasoningChunk) as unknown as vscode.LanguageModelResponsePart);
-					emitted = true;
 				} catch (e) {
 					console.error("[DeepSeek V4] ThinkingPart emit failed", e);
 				}
 			} else if (!ctx.hasShownThinkingHint) {
 				progress.report(new vscode.LanguageModelTextPart(THINKING_FALLBACK_HINT));
 				ctx.hasShownThinkingHint = true;
-				emitted = true;
 			}
 		}
 
-		if (deltaObj?.content) {
-			const content = String(deltaObj.content);
-			if (content.length > 0) {
-				progress.report(new vscode.LanguageModelTextPart(content));
-				emitted = true;
-			}
+		if (events.content !== undefined) {
+			progress.report(new vscode.LanguageModelTextPart(events.content));
 		}
 
-		if (deltaObj?.tool_calls) {
-			const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
-
-			for (const tc of toolCalls) {
-				const idx = (tc.index as number) ?? 0;
-				// Ignore any further deltas for an index we've already completed
-				if (ctx.completedToolCallIndices.has(idx)) {
-					continue;
-				}
-				const buf = ctx.toolCallBuffers.get(idx) ?? { args: "" };
-				if (tc.id && typeof tc.id === "string") {
-					buf.id = tc.id as string;
-				}
-				const func = tc.function as Record<string, unknown> | undefined;
-				if (func?.name && typeof func.name === "string") {
-					buf.name = func.name as string;
-				}
-				if (typeof func?.arguments === "string") {
-					buf.args += func.arguments as string;
-				}
-				ctx.toolCallBuffers.set(idx, buf);
-
-				// Emit immediately once arguments become valid JSON to avoid perceived hanging
-				await this.tryEmitBufferedToolCall(ctx, idx, progress);
-			}
+		if (events.toolCallDeltas) {
+			// Assembly semantics (index dedup, early emit once JSON args are
+			// valid) live in ToolCallAssembler — sse.ts. Emit whatever this
+			// chunk completed, in order.
+			this.reportToolCalls(ctx, ctx.toolCalls.add(events.toolCallDeltas), progress);
 		}
 
-		const finish = (choice.finish_reason as string | undefined) ?? undefined;
+		const finish = events.finishReason;
 		if (finish !== undefined) {
 			// DeepSeek can return special finish_reasons INSIDE an HTTP 200
 			// response (i.e. mid-stream truncation). The official docs list:
@@ -1990,11 +1962,26 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// Only require valid JSON args when the stream finished cleanly.
 			// On truncation, partial tool-call JSON is expected; we flush
 			// best-effort and drop unparseable buffers without throwing.
-			const isClean = finish === "tool_calls" || finish === "stop";
-			await this.flushToolCallBuffers(ctx, progress, /*throwOnInvalid=*/ isClean);
+			this.reportToolCalls(ctx, ctx.toolCalls.flush(/*throwOnInvalid=*/ isCleanFinish(finish)), progress);
 			this.persistReasoningForTurn(ctx);
 		}
-		return emitted;
+	}
+
+	/**
+	 * Report assembled tool calls to the host. The model echoes the wire
+	 * alias; report the HOST name so VS Code's tool registry can dispatch
+	 * (issue #20). Names not in the map (model hallucination) pass through
+	 * unchanged — the same failure mode that existed before aliasing.
+	 */
+	private reportToolCalls(
+		ctx: StreamContext,
+		calls: readonly CompletedToolCall[],
+		progress: vscode.Progress<vscode.LanguageModelResponsePart>
+	): void {
+		for (const call of calls) {
+			const hostName = ctx.wireNameToHost.get(call.name) ?? call.name;
+			progress.report(new vscode.LanguageModelToolCallPart(call.id, hostName, call.args));
+		}
 	}
 
 	/**
@@ -2151,72 +2138,5 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			this.log("cache.attach", { hits, misses, total: hits + misses });
 		}
 		return { hits, misses };
-	}
-
-	/**
-	 * Try to emit a buffered tool call when a valid name and JSON arguments are available.
-	 * @param ctx Per-call stream state.
-	 * @param index The tool call index from the stream.
-	 * @param progress Progress reporter for parts.
-	 */
-	private async tryEmitBufferedToolCall(
-		ctx: StreamContext,
-		index: number,
-		progress: vscode.Progress<vscode.LanguageModelResponsePart>
-	): Promise<void> {
-		const buf = ctx.toolCallBuffers.get(index);
-		if (!buf) {
-			return;
-		}
-		if (!buf.name) {
-			return;
-		}
-		const canParse = tryParseJSONObject(buf.args);
-		if (!canParse.ok) {
-			return;
-		}
-		const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
-		// The model echoes the wire alias; report the HOST name so VS Code's
-		// tool registry can dispatch (issue #20). Names not in the map
-		// (model hallucination) pass through unchanged — the same failure
-		// mode that existed before aliasing.
-		const hostName = ctx.wireNameToHost.get(buf.name) ?? buf.name;
-		progress.report(new vscode.LanguageModelToolCallPart(id, hostName, canParse.value));
-		ctx.toolCallBuffers.delete(index);
-		ctx.completedToolCallIndices.add(index);
-	}
-
-	/**
-	 * Flush all buffered tool calls, optionally throwing if arguments are not valid JSON.
-	 * @param ctx Per-call stream state.
-	 * @param progress Progress reporter for parts.
-	 * @param throwOnInvalid If true, throw when a tool call has invalid JSON args.
-	 */
-	private async flushToolCallBuffers(
-		ctx: StreamContext,
-		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-		throwOnInvalid: boolean
-	): Promise<void> {
-		if (ctx.toolCallBuffers.size === 0) {
-			return;
-		}
-		for (const [idx, buf] of Array.from(ctx.toolCallBuffers.entries())) {
-			const parsed = tryParseJSONObject(buf.args);
-			if (!parsed.ok) {
-				if (throwOnInvalid) {
-					console.error("[DeepSeek V4] Invalid JSON for tool call", { idx, snippet: (buf.args || "").slice(0, 200) });
-					throw new Error("Invalid JSON for tool call");
-				}
-				// When not throwing (e.g. on [DONE]), drop silently to reduce noise
-				continue;
-			}
-			const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
-			const name = buf.name ?? "unknown_tool";
-			// Same wire→host reverse mapping as tryEmitBufferedToolCall.
-			const hostName = ctx.wireNameToHost.get(name) ?? name;
-			progress.report(new vscode.LanguageModelToolCallPart(id, hostName, parsed.value));
-			ctx.toolCallBuffers.delete(idx);
-			ctx.completedToolCallIndices.add(idx);
-		}
 	}
 }

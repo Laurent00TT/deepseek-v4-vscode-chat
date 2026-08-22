@@ -57,6 +57,19 @@ export interface OpenAIChatMessage {
 }
 
 /**
+ * Usage block on the final streamed chunk (stream_options.include_usage).
+ * Lives here (a leaf module) so the vscode-free sse.ts can reference it
+ * without importing provider.ts.
+ */
+export interface DSUsage {
+	prompt_tokens?: number;
+	prompt_cache_hit_tokens?: number;
+	prompt_cache_miss_tokens?: number;
+	completion_tokens?: number;
+	completion_tokens_details?: { reasoning_tokens?: number };
+}
+
+/**
  * Streamed delta payload returned by DeepSeek /v1/chat/completions in stream mode.
  * `reasoning_content` arrives interleaved with `content`, both can be partial.
  */
