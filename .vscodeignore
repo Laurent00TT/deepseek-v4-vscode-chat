@@ -18,16 +18,20 @@ tsconfig.json
 eslint.config.mjs
 .prettierignore
 .prettierrc
+.c8rc.json
 
 # Repo metadata
 .github/**
 .gitignore
 docs/**
 .claude/**
+.superpowers/**
+.git-blame-ignore-revs
 
 # Build artifacts kept out of the package
 **/*.map
 *.vsix
+coverage/**
 
 # Markdown — keep only the user-facing ones
 *.md

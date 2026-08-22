@@ -1,0 +1,7 @@
+{
+	"include": ["out/**/*.js"],
+	"exclude": ["out/**/*.map"],
+	"reporter": ["text", "text-summary"],
+	"all": true,
+	"clean": true
+}

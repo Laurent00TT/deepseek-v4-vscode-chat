@@ -49,10 +49,7 @@ export function disposeContextUsageWebview(): void {
 	currentPanel = undefined;
 }
 
-export function showContextUsageWebview(
-	service: ContextUsageService,
-	output: vscode.OutputChannel,
-): void {
+export function showContextUsageWebview(service: ContextUsageService, output: vscode.OutputChannel): void {
 	const column = vscode.ViewColumn.Beside;
 
 	if (currentPanel) {
@@ -71,7 +68,7 @@ export function showContextUsageWebview(
 		{
 			enableScripts: true,
 			retainContextWhenHidden: true,
-		},
+		}
 	);
 
 	currentPanel = panel;

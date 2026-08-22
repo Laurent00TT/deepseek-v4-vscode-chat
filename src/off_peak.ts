@@ -45,7 +45,8 @@ export function isPeakTime(date: Date): boolean {
  */
 export function offPeakWindowsUtc(): ReadonlyArray<readonly [number, number]> {
 	return PEAK_WINDOWS_UTC.map(([, end], i) => {
-		const next = i + 1 < PEAK_WINDOWS_UTC.length ? PEAK_WINDOWS_UTC[i + 1][0] : PEAK_WINDOWS_UTC[0][0] + MINUTES_PER_DAY;
+		const next =
+			i + 1 < PEAK_WINDOWS_UTC.length ? PEAK_WINDOWS_UTC[i + 1][0] : PEAK_WINDOWS_UTC[0][0] + MINUTES_PER_DAY;
 		return [end, next] as const;
 	});
 }
@@ -62,10 +63,7 @@ export function offPeakWindowsUtc(): ReadonlyArray<readonly [number, number]> {
  * it into two rows would double the visual noise for half the world's
  * timezones.
  */
-export function formatWindowsLocal(
-	windows: ReadonlyArray<readonly [number, number]>,
-	offsetMinutes: number,
-): string {
+export function formatWindowsLocal(windows: ReadonlyArray<readonly [number, number]>, offsetMinutes: number): string {
 	const mod = (m: number) => ((m % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 	const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 	return windows

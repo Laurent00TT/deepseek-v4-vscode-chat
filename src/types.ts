@@ -18,18 +18,55 @@ export interface OpenAIFunctionToolDef {
 /** OpenAI-style chat roles. */
 export type OpenAIChatRole = "system" | "user" | "assistant" | "tool";
 
+/** Text block of a multimodal content array. */
+export interface OpenAITextContentPart {
+	type: "text";
+	text: string;
+}
+
+/**
+ * Image block of a multimodal content array. The Vision API accepts a
+ * `data:` URL (base64) or an external https URL; this extension always
+ * sends `data:` URLs built from the attachment bytes VS Code hands us.
+ */
+export interface OpenAIImageContentPart {
+	type: "image_url";
+	image_url: { url: string };
+}
+
+export type OpenAIContentPart = OpenAITextContentPart | OpenAIImageContentPart;
+
 /**
  * OpenAI-style chat message. `reasoning_content` is the DeepSeek extension that
  * carries the assistant's chain-of-thought; it must be passed back when the
  * assistant turn contained tool_calls.
+ *
+ * `content` is a plain string for text-only messages (every message before
+ * the Vision variants existed) and a block array only for user messages
+ * that carry images to a vision-capable model — the string shape is kept
+ * wherever possible so text-only requests are byte-identical to previous
+ * versions (server prompt-cache prefix stability).
  */
 export interface OpenAIChatMessage {
 	role: OpenAIChatRole;
-	content?: string;
+	content?: string | OpenAIContentPart[];
 	name?: string;
 	tool_calls?: OpenAIToolCall[];
 	tool_call_id?: string;
 	reasoning_content?: string;
+}
+
+/**
+ * Usage block on the final streamed chunk (stream_options.include_usage).
+ * Lives here (a leaf module) so the vscode-free sse.ts can reference it
+ * without importing provider.ts.
+ */
+export interface DSUsage {
+	prompt_tokens?: number;
+	prompt_cache_hit_tokens?: number;
+	prompt_cache_miss_tokens?: number;
+	completion_tokens?: number;
+	completion_tokens_details?: { reasoning_tokens?: number };
 }
 
 /**
@@ -71,8 +108,14 @@ export interface DeepSeekModelVariant {
 	id: string;
 	displayName: string;
 	tooltip: string;
-	apiModel: "deepseek-v4-pro" | "deepseek-v4-flash";
+	apiModel: "deepseek-v4-pro" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp";
 	thinking: boolean;
+	/**
+	 * Whether the variant accepts image input (multimodal). Drives the
+	 * `capabilities.imageInput` flag in the model picker and gates the
+	 * image-block conversion in convertMessages.
+	 */
+	vision?: boolean;
 	maxInputTokens: number;
 	maxOutputTokens: number;
 }

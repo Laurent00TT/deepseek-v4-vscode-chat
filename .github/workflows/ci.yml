@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -28,8 +28,11 @@ jobs:
       - name: ESLint
         run: npm run lint
 
-      - name: Unit tests
-        run: npm test
+      - name: Prettier check
+        run: npx prettier --check .
+
+      - name: Unit + adapter tests (with coverage)
+        run: npm run test:coverage
 
       - name: vsce package (sanity check)
         run: npx @vscode/vsce package -o /tmp/extension.vsix

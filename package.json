@@ -2,8 +2,8 @@
 	"name": "deepseek-v4-vscode-chat",
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
-	"description": "Use DeepSeek V4 (Pro / Flash) with extended thinking as a native model provider in GitHub Copilot Chat.",
-	"version": "0.3.11",
+	"description": "Use DeepSeek V4 (Pro / Flash / Flash Vision) with extended thinking and image input as a native model provider in GitHub Copilot Chat.",
+	"version": "0.4.0",
 	"icon": "assets/icon.png",
 	"author": {
 		"name": "Laurent00TT",
@@ -32,6 +32,8 @@
 		"thinking",
 		"reasoning",
 		"agent",
+		"vision",
+		"multimodal",
 		"llm",
 		"ai"
 	],
@@ -149,8 +151,10 @@
 		"publish": "vsce publish",
 		"prepare-icon": "node scripts/prepare-icon.mjs",
 		"pretest": "npm run compile",
-		"test": "npm run test:unit",
-		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_off_peak.mjs && node test/unit_tool_name_validation.mjs && node test/unit_tool_wire_name.mjs && node test/unit_tool_limit.mjs && node test/unit_context_usage.mjs && node test/unit_tool_choice.mjs && node test/unit_request_kind.mjs && node test/unit_reasoning_cache.mjs"
+		"test": "npm run test:unit && npm run test:adapter",
+		"test:unit": "node test/run_tests.mjs unit",
+		"test:adapter": "node test/run_tests.mjs adapter",
+		"test:coverage": "c8 npm test"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",
@@ -158,8 +162,9 @@
 		"@types/node": "^22",
 		"@types/vscode": "^1.106.0",
 		"@vscode/vsce": "^3.2.0",
+		"c8": "12.0.0",
 		"eslint": "^9.13.0",
-		"prettier": "^3.1.0",
+		"prettier": "3.8.3",
 		"sharp": "^0.34.5",
 		"typescript": "^5.9.2",
 		"typescript-eslint": "^8.39.0"

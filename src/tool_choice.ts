@@ -18,15 +18,12 @@
  * (tool_choice).
  */
 
-export type ToolChoice =
-	| "auto"
-	| "required"
-	| { type: "function"; function: { name: string } };
+export type ToolChoice = "auto" | "required" | { type: "function"; function: { name: string } };
 
 export function resolveToolChoice(
 	requiredMode: boolean,
 	toolCount: number,
-	firstToolName: string | undefined,
+	firstToolName: string | undefined
 ): ToolChoice {
 	if (!requiredMode) {
 		return "auto";

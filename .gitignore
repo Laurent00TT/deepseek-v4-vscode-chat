@@ -7,6 +7,7 @@ node_modules/
 
 # Test artifacts
 .vscode-test/
+coverage/
 
 # Ad-hoc integration probes — kept out of version control because they
 # require a real DEEPSEEK_API_KEY and re-running them isn't part of any

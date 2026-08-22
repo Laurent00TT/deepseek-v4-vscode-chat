@@ -6,10 +6,16 @@
 //
 // What this test proves:
 //   1. With thinking enabled, turn-1 returns reasoning_content + tool_call.
-//   2. Sending turn-2 WITHOUT reasoning_content reproduces the 400 the
-//      user is hitting in VS Code (sanity-check of the failure mode).
+//   2. (Informational) Whether turn-2 WITHOUT reasoning_content is still
+//      rejected. Through early 2026-08 this was a hard 400 ("The
+//      reasoning_content in the thinking mode must be passed back to the
+//      API") — the failure mode users hit in VS Code. From 2026-08-22 the
+//      live API was observed to ACCEPT it (consistently, on deepseek-v4-pro
+//      and the Vision model) even though the Thinking Mode guide still
+//      documents the 400. The script records what the server does today and
+//      always continues to check 3.
 //   3. Sending turn-2 WITH reasoning_content attached to the prior assistant
-//      message succeeds — i.e. the round-trip fix at the protocol level works.
+//      message succeeds — i.e. the round-trip the extension performs works.
 
 import process from "node:process";
 
@@ -171,7 +177,7 @@ async function main() {
 	const tc = turn1.toolCalls[0];
 
 	// === TURN 2 (NEGATIVE): omit reasoning_content from prior assistant turn ===
-	console.log("\n=== TURN 2 (NEGATIVE — no reasoning_content): expect 400 ===");
+	console.log("\n=== TURN 2 (NEGATIVE — no reasoning_content): does the server still 400? (informational) ===");
 	const turn2NegMessages = [
 		{ role: "user", content: "What's the weather in Tokyo right now?" },
 		{
@@ -187,17 +193,24 @@ async function main() {
 		},
 	];
 	const turn2Neg = await streamChat({ ...baseBody, messages: turn2NegMessages }, "turn2-neg");
+	// Informational since 2026-08-22: the live API stopped rejecting this
+	// shape even though the docs still describe the 400. Record today's
+	// behaviour and ALWAYS continue to the positive check — the round-trip
+	// the extension performs must keep working either way.
 	if (turn2Neg.ok) {
-		console.error("UNEXPECTED: turn-2 without reasoning_content was accepted by DS. The protocol assumption is wrong.");
-		process.exit(3);
+		console.log(
+			"  (note) ACCEPTED without reasoning_content — the API is lenient today; the extension still attaches reasoning for continuity and in case the rule is re-tightened.",
+		);
+	} else {
+		console.log(`  status=${turn2Neg.status} statusText=${turn2Neg.statusText}`);
+		console.log(`  body=${turn2Neg.body.slice(0, 400)}`);
+		if (/reasoning_content|thinking/i.test(turn2Neg.body)) {
+			console.log("  ✓ Strict rule enforced: reproduced the 400 the round-trip exists to prevent.");
+		} else {
+			console.error("UNEXPECTED: rejected, but not for a reasoning_content reason.");
+			process.exit(3);
+		}
 	}
-	console.log(`  status=${turn2Neg.status} statusText=${turn2Neg.statusText}`);
-	console.log(`  body=${turn2Neg.body.slice(0, 400)}`);
-	if (!/reasoning_content|thinking/i.test(turn2Neg.body)) {
-		console.error("UNEXPECTED: 400 returned but not for reasoning_content reason.");
-		process.exit(3);
-	}
-	console.log("  ✓ Reproduced the 400 we are trying to fix.");
 
 	// === TURN 2 (POSITIVE): attach reasoning_content ===
 	console.log("\n=== TURN 2 (POSITIVE — with reasoning_content): expect success ===");
