@@ -72,13 +72,7 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBar.command = SHOW_LOG_COMMAND;
 	context.subscriptions.push(statusBar);
 
-	const provider = new DeepSeekV4ChatModelProvider(
-		context.secrets,
-		ua,
-		outputChannel,
-		context.globalState,
-		statusBar,
-	);
+	const provider = new DeepSeekV4ChatModelProvider(context.secrets, ua, outputChannel, context.globalState, statusBar);
 	context.subscriptions.push(
 		vscode.lm.registerLanguageModelChatProvider(VENDOR, provider),
 		{ dispose: () => provider.dispose() },
@@ -86,7 +80,7 @@ export function activate(context: vscode.ExtensionContext) {
 		// deactivate even if VS Code's implicit per-extension cleanup
 		// changes behaviour in a future release. Idempotent — no-op when
 		// the panel is already closed.
-		{ dispose: () => disposeContextUsageWebview() },
+		{ dispose: () => disposeContextUsageWebview() }
 	);
 
 	context.subscriptions.push(
@@ -101,7 +95,9 @@ export function activate(context: vscode.ExtensionContext) {
 		// entry in a future release is a one-line manifest change. The backing
 		// webview module (`context_usage_webview.ts`) stays compiled and its
 		// dispose hook above keeps cleanup correct.
-		vscode.commands.registerCommand(SHOW_CONTEXT_WINDOW_COMMAND, () => showContextUsageWebview(provider.contextUsage, outputChannel)),
+		vscode.commands.registerCommand(SHOW_CONTEXT_WINDOW_COMMAND, () =>
+			showContextUsageWebview(provider.contextUsage, outputChannel)
+		),
 		vscode.commands.registerCommand(COMPACT_COPILOT_CHAT_COMMAND, () => bridgeCompactCopilotChat(outputChannel)),
 		vscode.commands.registerCommand(SHOW_CACHE_STATS_COMMAND, () => {
 			const stats = provider.getCacheStats();
@@ -137,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const summary = `Reasoning cache: ${stats.entryCount} entries, ${totalKB} KB, ${hitPct}% hit rate`;
 			if (stats.totalMisses > 0 && stats.hitRate < 0.5) {
 				vscode.window.showWarningMessage(
-					`${summary} — low hit rate may cause 400 errors in multi-turn conversations. Try starting a new chat.`,
+					`${summary} — low hit rate may cause 400 errors in multi-turn conversations. Try starting a new chat.`
 				);
 			} else {
 				vscode.window.showInformationMessage(summary);
@@ -164,7 +160,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const validating = vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Notification, title: "Validating DeepSeek API key…" },
-				async () => validateApiKey(trimmed, ua),
+				async () => validateApiKey(trimmed, ua)
 			);
 			const failureReason = await validating;
 
@@ -173,7 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
 					`API key validation failed: ${failureReason}`,
 					{ modal: false },
 					"Save anyway",
-					"Cancel",
+					"Cancel"
 				);
 				if (choice !== "Save anyway") {
 					return;
@@ -184,9 +180,9 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(
 				failureReason === null
 					? "DeepSeek API key validated and saved."
-					: "DeepSeek API key saved (without successful validation).",
+					: "DeepSeek API key saved (without successful validation)."
 			);
-		}),
+		})
 	);
 
 	// First-run UX: open the walkthrough if the user hasn't seen it AND
@@ -196,10 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
 	void showWelcomeIfNeeded(context, outputChannel);
 }
 
-async function showWelcomeIfNeeded(
-	context: vscode.ExtensionContext,
-	output: vscode.OutputChannel,
-): Promise<void> {
+async function showWelcomeIfNeeded(context: vscode.ExtensionContext, output: vscode.OutputChannel): Promise<void> {
 	try {
 		if (context.globalState.get<boolean>(WELCOME_SHOWN_KEY)) {
 			return;
@@ -211,11 +204,7 @@ async function showWelcomeIfNeeded(
 			await context.globalState.update(WELCOME_SHOWN_KEY, true);
 			return;
 		}
-		await vscode.commands.executeCommand(
-			"workbench.action.openWalkthrough",
-			WALKTHROUGH_ID,
-			false,
-		);
+		await vscode.commands.executeCommand("workbench.action.openWalkthrough", WALKTHROUGH_ID, false);
 		await context.globalState.update(WELCOME_SHOWN_KEY, true);
 	} catch (e) {
 		output.appendLine(`[welcome] failed to open walkthrough: ${e instanceof Error ? e.message : String(e)}`);
@@ -237,7 +226,7 @@ async function bridgeCompactCopilotChat(output: vscode.OutputChannel): Promise<v
 	output.appendLine(`[compact] ${COPILOT_COMPACT_COMMAND} not found`);
 	void vscode.window.showInformationMessage(
 		"Compact Copilot Chat: Copilot Chat is required for this action. " +
-		`The command \`${COPILOT_COMPACT_COMMAND}\` was not found — install GitHub Copilot Chat from the Marketplace.`,
+			`The command \`${COPILOT_COMPACT_COMMAND}\` was not found — install GitHub Copilot Chat from the Marketplace.`
 	);
 }
 

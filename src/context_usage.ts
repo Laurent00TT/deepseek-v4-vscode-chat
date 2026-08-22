@@ -85,7 +85,7 @@ export interface ApiUsageInput {
 export function snapshotFromEstimate(
 	input: EstimateInput,
 	previous: ContextUsageSnapshot | undefined,
-	now: number,
+	now: number
 ): ContextUsageSnapshot {
 	// Preserve any API values we already have for this same model, since
 	// they're still describing the previous turn's reality. Drop them if
@@ -128,7 +128,7 @@ export function snapshotFromEstimate(
 export function snapshotFromApi(
 	input: ApiUsageInput,
 	previous: ContextUsageSnapshot | undefined,
-	now: number,
+	now: number
 ): ContextUsageSnapshot {
 	const sameModel = previous?.modelId === input.modelId;
 	const estimatedMessageTokens = sameModel ? (previous?.estimatedMessageTokens ?? 0) : 0;

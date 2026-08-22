@@ -211,9 +211,7 @@ export class ReasoningCache {
 	/** Restore from a previously-serialized snapshot. Truncates to maxSize.
 	 * Also enforces MAX_TOTAL_BYTES on restore — evicts oldest if needed. */
 	restore(entries: CachedTurn[]): void {
-		const valid = entries.filter(
-			(e) => e && typeof e.fingerprint === "string" && typeof e.reasoning === "string"
-		);
+		const valid = entries.filter((e) => e && typeof e.fingerprint === "string" && typeof e.reasoning === "string");
 		this.buffer = valid.slice(-this.maxSize);
 		// Rebuild byte counter from restored entries
 		this._totalBytes = 0;
@@ -267,10 +265,7 @@ export function fingerprintAssistantTurn(input: AssistantTurnFingerprintInput): 
 	// composed/decomposed forms of the same glyph produce identical hashes.
 	// Example: "\u00E9" (é) and "e\u0301" (e + combining acute) both
 	// normalize to "\u00E9" under NFKC.
-	const norm = input.text
-		.normalize("NFKC")
-		.replace(/\s+/g, " ")
-		.trim();
+	const norm = input.text.normalize("NFKC").replace(/\s+/g, " ").trim();
 	if (!norm) {
 		return "";
 	}

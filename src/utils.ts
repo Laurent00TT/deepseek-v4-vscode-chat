@@ -23,7 +23,7 @@ import { buildUserContent, type UserContentInput } from "./image_content";
  */
 export function convertMessages(
 	messages: readonly vscode.LanguageModelChatRequestMessage[],
-	opts?: { imageInput?: boolean },
+	opts?: { imageInput?: boolean }
 ): OpenAIChatMessage[] {
 	const imageInput = opts?.imageInput === true;
 	const out: OpenAIChatMessage[] = [];
@@ -82,12 +82,12 @@ export function convertMessages(
 			const built = buildUserContent(contentInputs, imageInput);
 			if (built.droppedNoVision > 0) {
 				console.warn(
-					`[DeepSeek V4] dropped ${built.droppedNoVision} image attachment(s): the selected model variant has no image input. Pick a Vision variant to send images.`,
+					`[DeepSeek V4] dropped ${built.droppedNoVision} image attachment(s): the selected model variant has no image input. Pick a Vision variant to send images.`
 				);
 			}
 			if (built.droppedUnsupported > 0) {
 				console.warn(
-					`[DeepSeek V4] dropped ${built.droppedUnsupported} image attachment(s) with unsupported MIME type (Vision accepts JPEG/PNG/GIF/WebP).`,
+					`[DeepSeek V4] dropped ${built.droppedUnsupported} image attachment(s) with unsupported MIME type (Vision accepts JPEG/PNG/GIF/WebP).`
 				);
 			}
 			if (built.content.length > 0) {
@@ -141,8 +141,8 @@ export function convertTools(options: vscode.ProvideLanguageModelChatResponseOpt
 export function validateRequest(messages: readonly vscode.LanguageModelChatRequestMessage[]): void {
 	const lastMessage = messages[messages.length - 1];
 	if (!lastMessage) {
-    console.error("[DeepSeek V4] No messages in request");
-    throw new Error("Invalid request: no messages.");
+		console.error("[DeepSeek V4] No messages in request");
+		throw new Error("Invalid request: no messages.");
 	}
 
 	messages.forEach((message, i) => {
@@ -162,8 +162,8 @@ export function validateRequest(messages: readonly vscode.LanguageModelChatReque
 			while (toolCallIds.size > 0) {
 				const nextMessage = messages[nextMessageIdx++];
 				if (!nextMessage || nextMessage.role !== vscode.LanguageModelChatMessageRole.User) {
-                    console.error("[DeepSeek V4] Validation failed: missing tool result for call IDs:", Array.from(toolCallIds));
-                    throw new Error(errMsg);
+					console.error("[DeepSeek V4] Validation failed: missing tool result for call IDs:", Array.from(toolCallIds));
+					throw new Error(errMsg);
 				}
 
 				nextMessage.content.forEach((part) => {
@@ -171,8 +171,8 @@ export function validateRequest(messages: readonly vscode.LanguageModelChatReque
 						const ctorName =
 							(Object.getPrototypeOf(part as object) as { constructor?: { name?: string } } | undefined)?.constructor
 								?.name ?? typeof part;
-                        console.error("[DeepSeek V4] Validation failed: expected tool result part, got:", ctorName);
-                        throw new Error(errMsg);
+						console.error("[DeepSeek V4] Validation failed: expected tool result part, got:", ctorName);
+						throw new Error(errMsg);
 					}
 					const callId = (part as { callId: string }).callId;
 					toolCallIds.delete(callId);
@@ -238,8 +238,7 @@ function collectToolResultText(pr: { content?: ReadonlyArray<unknown> }): string
 			const mimeType = isObj ? (c as { mimeType?: unknown }).mimeType : undefined;
 			if (mimeType !== "cache_control") {
 				const ctor = isObj
-					? (Object.getPrototypeOf(c as object) as { constructor?: { name?: string } } | undefined)
-							?.constructor?.name
+					? (Object.getPrototypeOf(c as object) as { constructor?: { name?: string } } | undefined)?.constructor?.name
 					: undefined;
 				console.warn(
 					`[DeepSeek V4] dropped unknown tool-result part: ctor=${ctor ?? typeof c} mimeType=${String(mimeType)}`

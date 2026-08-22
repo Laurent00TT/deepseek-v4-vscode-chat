@@ -22,7 +22,7 @@ export function shouldWarnCacheBreakdown(
 	currHitRate: number,
 	peakHitRate: number,
 	reasoningMissesThisTurn: number,
-	lastWarnTime: number | undefined,
+	lastWarnTime: number | undefined
 ): boolean {
 	if (lastWarnTime && Date.now() - lastWarnTime < 5 * 60_000) {
 		return false;
@@ -30,10 +30,10 @@ export function shouldWarnCacheBreakdown(
 	if (reasoningMissesThisTurn === 0) {
 		return false;
 	}
-	if (peakHitRate < 0.70) {
+	if (peakHitRate < 0.7) {
 		return false;
 	}
-	if (currHitRate > 0.20) {
+	if (currHitRate > 0.2) {
 		return false;
 	}
 	return true;

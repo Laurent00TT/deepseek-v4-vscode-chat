@@ -43,8 +43,7 @@ const CHAT_TITLE_PREFIXES = [
 	"You are an expert in crafting ultra-compact titles",
 	"You are an expert in crafting pithy titles",
 ] as const;
-const INLINE_PROGRESS_MESSAGE_PREFIX =
-	"You are an expert in writing short, catchy, and encouraging progress messages";
+const INLINE_PROGRESS_MESSAGE_PREFIX = "You are an expert in writing short, catchy, and encouraging progress messages";
 const GIT_BRANCH_NAME_PREFIX = "You are an expert in crafting pithy branch names";
 const GIT_COMMIT_MESSAGE_PREFIX =
 	"You are an AI programming assistant, helping a software developer to come with the best git commit message";
@@ -76,7 +75,7 @@ function isOnlyTool(toolNames: readonly string[], toolName: string): boolean {
 export function classifyRequestKind(
 	firstText: string,
 	latestUserText: string,
-	toolNames: readonly string[],
+	toolNames: readonly string[]
 ): RequestKind {
 	const first = firstText.trimStart();
 	const latest = latestUserText.trimStart();
@@ -110,11 +109,7 @@ export function classifyRequestKind(
 	if (first.startsWith(CONVERSATION_SUMMARIZER_PREFIX)) {
 		return "conversation-summarizer";
 	}
-	if (
-		first.startsWith(MAIN_AGENT_PREFIX) ||
-		first.includes("<skills>") ||
-		first.includes("<agents>")
-	) {
+	if (first.startsWith(MAIN_AGENT_PREFIX) || first.includes("<skills>") || first.includes("<agents>")) {
 		return "main-agent";
 	}
 	if (toolNames.length > 0 || first.length > 0) {
