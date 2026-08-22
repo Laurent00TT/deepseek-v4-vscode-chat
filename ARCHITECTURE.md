@@ -14,7 +14,7 @@ VS Code LM API
 DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, options, progress, token)
     │  → creates a fresh StreamContext (per-call state, see below)
     │
-    ├─ convertMessages(messages)         ← VS Code parts → OpenAI message[]
+    ├─ convertMessages(messages, {imageInput})  ← VS Code parts → OpenAI message[] (image data parts → image_url blocks on Vision variants, see "Multimodal image input")
     ├─ attachReasoningToHistory(out)     ← inject cached reasoning_content into prior assistant turns
     ├─ convertTools(options)             ← VS Code tools → OpenAI function tool defs (host names → wire aliases, see "Tool-name wire aliasing")
     │
@@ -338,6 +338,48 @@ Session cost is derived from `/user/balance` diff (`sessionSpend = startBalance 
 
 Per-turn **context-window** usage is reported to GitHub Copilot Chat's native context indicator via a `usage` `LanguageModelDataPart` on the response `progress` stream (see `provideLanguageModelChatResponse`). The host owns the conversation, so its native indicator is inherently per-conversation and follows the focused chat — a `LanguageModelChatProvider` gets no conversation id and no focus signal, so a custom status-bar percentage (the 0.3.6 surface) could only ever show "the last turn that ran" and swapped between conversations (#17). Only real turns drive it: `src/request_kind.ts` classifies each request by system-prompt prefix and we skip the small auxiliary requests Copilot routes through the model (chat-title, progress messages, todo tracking, git messages, …) so they can't reset the indicator. The status-bar **tooltip** still surfaces the DeepSeek-specific cache-hit rate (`prompt_cache_hit_tokens`), which Copilot's UI doesn't show; the status bar itself shows balance + session spend only.
 
+### Multimodal image input (Vision variants)
+
+The two `deepseek-v4-flash-vision-exp` variants (added 2026-08; DeepSeek's
+first multimodal model) declare `capabilities.imageInput`, so Copilot Chat
+enables image attachments for them. The wire changes exactly one thing:
+a **user** message that carries at least one image switches `content` from a
+plain string to the OpenAI-style block array
+
+```jsonc
+[
+  { "type": "text", "text": "..." },
+  { "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } }
+]
+```
+
+Everything else (endpoint, thinking mode, `reasoning_effort`, tools) is
+identical to Flash.
+
+Invariants, in decreasing order of importance:
+
+- **Text-only messages keep the plain-string shape byte-for-byte.**
+  `buildUserContent` (in the vscode-free `src/image_content.ts`) collapses
+  back to a string whenever no image survives, so every pre-vision
+  conversation serializes exactly as before — the server prompt-cache
+  prefix and the reasoning-cache fingerprints depend on this.
+- Images ride only on **user** turns. Assistant/system turns and tool
+  results never emit image blocks (DeepSeek's `tool` role is text-only).
+- MIME gate: JPEG/PNG/GIF/WebP (declared MIME, normalized —
+  `image/jpg` → `image/jpeg`, parameters stripped). Unsupported images are
+  dropped with a `console.warn`, never sent — one bad attachment must not
+  fail the whole request. On non-Vision variants every image is dropped
+  (with a warn); there is deliberately no vision-proxy fallback.
+- Token budgeting: images bill at up to **384 tokens each**
+  (`IMAGE_TOKENS_PER_IMAGE`); counted into the pre-flight overflow check,
+  the context-usage estimate, and `provideTokenCount`, and subtracted
+  before the chars/token EMA calibration (images add prompt tokens without
+  adding chars, which would otherwise drag the ratio).
+- Transport cap: DeepSeek rejects request bodies over **48 MiB**
+  (`MAX_REQUEST_BODY_BYTES`; base64 counts). The serialized body is
+  checked once before fetch and an actionable error ("attach fewer/smaller
+  images") replaces the opaque server 4xx.
+
 ### Errors and retry
 
 `fetchWithRetry` wraps every API call:
@@ -415,6 +457,9 @@ Files in `test/integration_*.mjs` hit the live DeepSeek API directly, **bypassin
 - `integration_round_trip.mjs` — basic thinking + tool_call round-trip
 - `integration_no_tc_assistant.mjs` — reasoning round-trip rules without `tools`
 - `integration_tools_present.mjs` — **the strict rule with `tools` present** (the corner case this extension is built around)
+- `integration_tools_advertised_no_tc.mjs` — reasoning rules when tools are advertised but the turn makes no tool call
+- `integration_cache_miss_fallback.mjs` — the `reasoning_content: ""` stub keeps a conversation alive after a cache miss
+- `integration_vision.mjs` — multimodal content blocks against `deepseek-v4-flash-vision-exp`: generates a solid-red PNG locally and requires the model to *see* it, in both thinking and non-thinking modes
 
 Run locally:
 

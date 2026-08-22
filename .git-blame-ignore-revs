@@ -1,0 +1,6 @@
+# Commits to hide from `git blame` (GitHub honors this file natively; locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# ).
+
+# style: adopt prettier repo-wide, pin its version, enforce in CI
+1fc19bb3bd62709075f051012063de1d5680f316

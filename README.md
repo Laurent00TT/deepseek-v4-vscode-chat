@@ -5,6 +5,8 @@ Native DeepSeek V4 (Pro / Flash / Flash Vision) provider for VS Code Copilot Cha
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.106%2B-blue)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
+[Changelog](./CHANGELOG.md) · [Architecture (contributor docs)](./ARCHITECTURE.md)
+
 ## Features
 
 - Six model variants in the Copilot model picker: **Pro (thinking)**, **Pro**, **Flash (thinking)**, **Flash**, **Flash Vision (thinking)**, **Flash Vision**
