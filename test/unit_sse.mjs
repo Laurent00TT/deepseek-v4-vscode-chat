@@ -27,6 +27,9 @@ import {
 	ToolCallAssembler,
 	tryParseJSONObject,
 } from "../out/sse.js";
+// This suite keeps its own check()/summary() (it predates the shared helpers);
+// withConsole is pulled in because it is vscode-free and this file is a PURE suite.
+import { withConsole } from "./helpers/check.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -154,9 +157,13 @@ const asm3 = new ToolCallAssembler();
 asm3.add([{ index: 0, id: "call_x", function: { name: "gamma", arguments: "{invalid" } }]);
 check("flush(false) drops invalid silently", asm3.flush(false), []);
 asm3.add([{ index: 1, id: "call_y", function: { name: "delta_fn", arguments: "{bad" } }]);
-const flushThrow = throwsWith(() => asm3.flush(true));
+// flush(true) console.errors the offending buffer before it throws — real,
+// expected behaviour, so capture it instead of letting it litter the run.
+const flushThrowCapture = withConsole("error", () => throwsWith(() => asm3.flush(true)));
+const flushThrow = flushThrowCapture.result;
 check("flush(true) throws on invalid JSON", flushThrow.threw, true);
 check("throw message unchanged from 0.3.x", flushThrow.message, "Invalid JSON for tool call");
+check("…after logging the offending buffer once", flushThrowCapture.lines.length, 1);
 
 // Missing id gets a generated call_<random> at completion time.
 const asm4 = new ToolCallAssembler();
