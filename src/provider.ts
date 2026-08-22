@@ -9,7 +9,7 @@ import {
 	Progress,
 } from "vscode";
 
-import type { DeepSeekModelVariant, DSUsage, OpenAIChatMessage } from "./types";
+import type { DSUsage, OpenAIChatMessage } from "./types";
 
 import { convertTools, convertMessages, validateRequest } from "./utils";
 import {
