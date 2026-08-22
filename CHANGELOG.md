@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **`.gitattributes` pins LF in the working tree (`* text=auto eol=lf`).** On Windows with the default `core.autocrlf=true`, every text file checked out as CRLF and `npx prettier --check .` (endOfLine `lf`) flagged all sources even though CI was green — the CONTRIBUTING verification matrix could not pass on a stock Windows clone. The index was already LF everywhere, so this is checkout-only; existing clones re-checkout once with `git rm --cached -r . && git reset --hard`.
 
+### Fixed
+
+- **429 / 5xx on the chat path now reach the user-facing error mapping.** `fetchWithRetry` used to throw its own synthetic `HTTP <status>` error once the three attempts were exhausted, so `provideLanguageModelChatResponse` never saw the final non-ok response: the rate-limit warning toast and the formatted `DeepSeek API error: 429 …` message (with the server's body) were unreachable from chat — the user got a bare `HTTP 429` and no notification. The last attempt's response is now returned un-drained and mapped like any other non-ok status (toast for 429; log line for 5xx); network errors, timeouts and aborts still reject. The 429 toast copy drops "the extension already retried" — true on the chat path, false for the balance refresh (plain fetch), so it is now neutral. Found by the new `adapter_provider_request` suite, which pins the corrected behaviour; `unit_api_client` pins the resolution contract.
+
 ## [0.3.11] - 2026-08-19
 
 ### Fixed

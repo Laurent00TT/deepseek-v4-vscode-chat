@@ -78,6 +78,12 @@ export function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
  * so the worst case adds ~3s normally and ~20s when the server explicitly
  * asks for it — still within Copilot's request timeout window.
  *
+ * Resolution contract: 2xx and non-retryable 4xx responses are returned
+ * immediately; a retryable status (429 / 5xx) on the LAST attempt is also
+ * returned — un-drained, so the caller can read the body and map the status
+ * (provider.ts surfaces the 429 toast / 5xx log from it). Only network
+ * errors, timeouts and user aborts reject.
+ *
  * A per-attempt timeout (default 5 min) prevents hangs. DeepSeek's thinking
  * mode with max effort can take 2–5 minutes for complex reasoning chains,
  * and the API itself gives up after 10 minutes of queuing, so 5 min is a
@@ -110,7 +116,6 @@ export async function fetchWithRetry(
 				return res;
 			}
 			// Retryable: 5xx server errors, 429 rate limit
-			lastErr = new Error(`HTTP ${res.status} ${res.statusText}`);
 			retryAfterHeader = res.headers.get("retry-after");
 			logger("retry", {
 				attempt: i + 1,
@@ -118,6 +123,17 @@ export async function fetchWithRetry(
 				willRetry: i < attempts - 1,
 				...(retryAfterHeader !== null ? { retryAfter: retryAfterHeader } : {}),
 			});
+			if (i === attempts - 1) {
+				// Last attempt: hand the response back UN-DRAINED so the caller
+				// can read the body and map the status like any other non-ok
+				// response (provider.ts → formatApiError → notifyApiError: the
+				// 429 toast, the 5xx log line). Throwing a synthetic
+				// `HTTP <status>` error here used to make those branches
+				// unreachable from the chat path — the user saw a bare
+				// "HTTP 429" and no toast.
+				return res;
+			}
+			lastErr = new Error(`HTTP ${res.status} ${res.statusText}`);
 			// Drain body so the connection can be reused
 			try {
 				await res.text();

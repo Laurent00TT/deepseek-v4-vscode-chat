@@ -180,9 +180,7 @@ async function notifyApiError(status: number, summary: string): Promise<void> {
 		return;
 	}
 	if (status === 429) {
-		void vscode.window.showWarningMessage(
-			`DeepSeek rate limited (429). The extension already retried — try again in a moment.`
-		);
+		void vscode.window.showWarningMessage(`DeepSeek rate limited (429) — try again in a moment.`);
 		return;
 	}
 	// 4xx that aren't user-actionable (400 schema bugs, etc.) just stay in the log.

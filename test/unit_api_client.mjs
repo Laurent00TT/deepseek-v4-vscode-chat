@@ -138,6 +138,25 @@ async function checkFetchWithRetry() {
 		check("abort surfaces as AbortError", abortResult.name, "AbortError");
 		check("abort cuts the capped 10s sleep short (<2s)", (abortResult.elapsed ?? 9999) < 2000, true);
 		check("aborted call stopped after the first attempt", calls, 1);
+
+		// Retryable status on EVERY attempt: once attempts are exhausted the
+		// FINAL response is returned un-drained (body still readable), not
+		// swallowed into a synthetic `HTTP <status>` error — so callers can
+		// format the body and notify the user (provider.ts → notifyApiError).
+		// attempts=2 keeps the backoff to a single 1s sleep.
+		calls = 0;
+		const exhaustedLogs = [];
+		globalThis.fetch = async () => {
+			calls++;
+			return makeResponse(429, { headers: { "retry-after": "0" }, body: '{"error":{"message":"rate"}}' });
+		};
+		const exhausted = await fetchWithRetry("https://x/", {}, new AbortController().signal, (msg, data) =>
+			exhaustedLogs.push({ msg, data }), 2);
+		check("exhausted retries resolve with the final response", exhausted.status, 429);
+		check("…after the configured number of attempts", calls, 2);
+		check("…with the body still readable", await exhausted.text(), '{"error":{"message":"rate"}}');
+		const lastRetryLog = exhaustedLogs.filter((l) => l.msg === "retry").at(-1);
+		check("…and the last attempt logged willRetry:false", lastRetryLog?.data?.willRetry, false);
 	} finally {
 		globalThis.fetch = realFetch;
 	}

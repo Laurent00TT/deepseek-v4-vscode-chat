@@ -162,7 +162,8 @@ async function main() {
 		if (c.external) check(`${c.status}: opens billing`, shim.calls.openExternal.includes(c.external), true);
 		provider.dispose();
 	}
-	// --- 429 is RETRIED, not mapped: three attempts, ~3s of backoff, then throw ---
+	// --- 429 is RETRIED, then mapped: three attempts, ~3s of backoff, then the
+	// final response is handed back so the user gets the formatted error + toast ---
 	{
 		// SLOW (~3s): fetchWithRetry does attempts=3 with 1s + 2s exponential
 		// backoff before giving up. Nothing here can be shortened without
@@ -170,26 +171,24 @@ async function main() {
 		shim.reset();
 		const { provider, output } = makeProvider();
 		// A Response body can only be read once and fetchWithRetry drains each
-		// attempt, so hand runTurn a FACTORY: one fresh 429 per attempt.
+		// retried attempt, so hand runTurn a FACTORY: one fresh 429 per attempt.
 		const t = await quiet(() => runTurn(provider, { response: () => jsonResponse(429, { error: { message: "rate" } }) }));
 		check("429 was retried, not surfaced on the first attempt", t.captured.attempts, 3);
 		checkMatch("…each attempt logged with the status", output.text(), /"status":429/);
 		checkMatch("…the last attempt records willRetry:false", output.text(), /"attempt":3,"status":429,"willRetry":false/);
-		// DIVERGENCE, pinned deliberately: notifyApiError's 429 branch is
-		// UNREACHABLE from the chat path. fetchWithRetry treats 429 as retryable
-		// and, once attempts are exhausted, throws its own `HTTP <status>
-		// <statusText>` error (api_client.ts) instead of returning the response,
-		// so provider.ts never reaches `if (!response.ok)` → formatApiError →
-		// notifyApiError. Hence a bare "HTTP 429" and NO toast on this path.
-		checkMatch("exhausted retries throw the transport error, not a formatted API error", t.error?.message, /^HTTP 429/);
-		check("…so no 'DeepSeek API error: 429' is produced here", /DeepSeek API error: 429/.test(String(t.error?.message)), false);
-		check("…and the chat path shows the user no toast at all", shim.calls.showWarningMessage.length + shim.calls.showErrorMessage.length, 0);
+		// After the last attempt fetchWithRetry RETURNS the 429 response (body
+		// intact) instead of throwing its own transport error, so provider.ts
+		// reaches `if (!response.ok)` → formatApiError → notifyApiError exactly
+		// as for the non-retryable statuses above. Before this was fixed the
+		// user saw a bare "HTTP 429" and no toast at all on the chat path.
+		checkMatch("exhausted retries surface the formatted API error (body included)", t.error?.message, /DeepSeek API error: 429.*rate/);
+		checkMatch("…and the rate-limit warning toast is shown on the chat path", shim.calls.showWarningMessage.at(-1)?.message, /rate limited \(429\)/);
+		check("…with NO buttons", shim.calls.showWarningMessage.at(-1)?.items.length, 0);
+		check("…and no error toast", shim.calls.showErrorMessage.length, 0);
 		provider.dispose();
 	}
-	// --- the 429 → "rate limited" toast, on the path that can actually reach it ---
+	// --- the same 429 toast from refreshBalance (plain fetch, no retry wrapper) ---
 	{
-		// refreshBalance uses a plain fetch (no retry wrapper), so a 429 there
-		// does reach notifyApiError. This is the only live caller of that branch.
 		shim.reset();
 		const { provider } = makeProvider();
 		onFetch(
