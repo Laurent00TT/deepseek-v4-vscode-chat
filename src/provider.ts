@@ -13,6 +13,7 @@ import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 import { IMAGE_TOKENS_PER_IMAGE, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
+import { buildRequestBody, coerceReasoningEffort } from "./request_body";
 import { toWireName, buildWireNameMap } from "./tool_names";
 import { assertAdvertisedToolLimit } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
@@ -1467,60 +1468,26 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				throw new Error("Message exceeds token limit.");
 			}
 
-			// When the host supplies a max_tokens hint we honour it (capped to
-			// the variant's ceiling). When it doesn't, we hand the model the
-			// full configured budget — important for thinking-max so the
-			// reasoning chain isn't silently truncated.
-			const requestedMaxTokens = options.modelOptions?.max_tokens;
-			const maxTokens =
-				typeof requestedMaxTokens === "number" && requestedMaxTokens > 0
-					? Math.min(requestedMaxTokens, model.maxOutputTokens)
-					: model.maxOutputTokens;
-
-			requestBody = {
-				model: variant.apiModel,
-				messages: openaiMessages,
-				stream: true,
-				stream_options: { include_usage: true },
-				max_tokens: maxTokens,
-				thinking: { type: variant.thinking ? "enabled" : "disabled" },
-			};
-
+			// Body layout (key order, param gating, max_tokens clamp) lives in
+			// the pure buildRequestBody — pinned byte-for-byte by the golden
+			// test in test/unit_request_body.mjs. Only the VS Code reads stay
+			// here.
+			const effort = coerceReasoningEffort(
+				vscode.workspace.getConfiguration("deepseekv4").get<string>("reasoningEffort", "max")
+			);
 			if (variant.thinking) {
-				const raw = vscode.workspace.getConfiguration("deepseekv4").get<string>("reasoningEffort", "max");
-				// Defensive: the package.json schema constrains the settings UI to
-				// "high" | "max", but a hand-edited settings.json could contain
-				// anything. Coerce unknown values to "max" rather than passing
-				// arbitrary strings to the API.
-				const effort: "high" | "max" = raw === "high" ? "high" : "max";
-				(requestBody as Record<string, unknown>).reasoning_effort = effort;
 				this.outputChannel.appendLine(`[req] reasoning_effort=${effort} (variant=${variant.id})`);
-				// Per DeepSeek docs: temperature/top_p/penalty params are ignored
-				// in thinking mode. We omit them to keep the request body honest.
-			} else {
-				(requestBody as Record<string, unknown>).temperature = options.modelOptions?.temperature ?? 0.7;
 			}
-
-			// Allow-list non-thinking-mode tuning options
-			if (options.modelOptions && !variant.thinking) {
-				const mo = options.modelOptions as Record<string, unknown>;
-				if (typeof mo.stop === "string" || Array.isArray(mo.stop)) {
-					(requestBody as Record<string, unknown>).stop = mo.stop;
-				}
-				if (typeof mo.frequency_penalty === "number") {
-					(requestBody as Record<string, unknown>).frequency_penalty = mo.frequency_penalty;
-				}
-				if (typeof mo.presence_penalty === "number") {
-					(requestBody as Record<string, unknown>).presence_penalty = mo.presence_penalty;
-				}
-			}
-
-			if (toolConfig.tools) {
-				(requestBody as Record<string, unknown>).tools = toolConfig.tools;
-			}
-			if (toolConfig.tool_choice) {
-				(requestBody as Record<string, unknown>).tool_choice = toolConfig.tool_choice;
-			}
+			requestBody = buildRequestBody({
+				apiModel: variant.apiModel,
+				messages: openaiMessages,
+				thinking: variant.thinking,
+				reasoningEffort: effort,
+				maxOutputTokens: model.maxOutputTokens,
+				modelOptions: options.modelOptions as Record<string, unknown> | undefined,
+				tools: toolConfig.tools,
+				tool_choice: toolConfig.tool_choice,
+			});
 			// Serialize once: reused for the size guard and the fetch body.
 			// DeepSeek caps the request body at 48 MiB, and base64 image
 			// payloads are what realistically get near it — the token
