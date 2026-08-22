@@ -18,6 +18,7 @@ tsconfig.json
 eslint.config.mjs
 .prettierignore
 .prettierrc
+.c8rc.json
 
 # Repo metadata
 .github/**

@@ -16,6 +16,9 @@ export default tseslint.config(
 			'test',
 			'scripts',
 			'docs',
+			'.claude',
+			'.superpowers',
+			'coverage',
 			'**/*.d.ts'
 		]
 	},

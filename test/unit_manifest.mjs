@@ -66,7 +66,7 @@ checkDeep("walkthrough steps", wt.steps.map((s) => s.id), ["setApiKey", "pickMod
 
 // --- packaging hygiene ---
 const vscodeignore = readFileSync(new URL("../.vscodeignore", import.meta.url), "utf8");
-for (const line of ["src/**", "test/**", ".claude/**", ".git-blame-ignore-revs", "**/*.map"]) {
+for (const line of ["src/**", "test/**", ".claude/**", ".superpowers/**", ".c8rc.json", ".git-blame-ignore-revs", "**/*.map"]) {
 	check(`.vscodeignore excludes ${line}`, vscodeignore.split(/\r?\n/).includes(line), true);
 }
 summary("unit_manifest");

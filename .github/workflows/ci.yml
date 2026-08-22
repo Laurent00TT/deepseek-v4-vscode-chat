@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -31,10 +31,7 @@ jobs:
       - name: Prettier check
         run: npx prettier --check .
 
-      - name: Unit tests
-        run: npm test
-
-      - name: Coverage report
+      - name: Unit + adapter tests (with coverage)
         run: npm run test:coverage
 
       - name: vsce package (sanity check)
