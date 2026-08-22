@@ -100,9 +100,13 @@ check("convertTools: Auto → 'auto'", convertTools({ tools: [{ name: "a" }], to
 checkDeep("convertTools: Required + 1 tool → named", convertTools({ tools: [{ name: "a" }], toolMode: vscode.LanguageModelChatToolMode.Required }).tool_choice, { type: "function", function: { name: "a" } });
 
 // --- validateRequest ---
-check("validateRequest: empty list throws", (() => { try { validateRequest([]); return false; } catch (e) { return /no messages/.test(e.message); } })(), true);
+const emptyList = captureConsole("error", () => { try { validateRequest([]); return false; } catch (e) { return /no messages/.test(e.message); } });
+check("validateRequest: empty list throws", emptyList.result, true);
+check("validateRequest: empty list throws — one error line captured", emptyList.lines.length, 1);
 check("validateRequest: paired call/result passes", (() => { validateRequest([userText("q"), assistantToolCallMsg("", [{ callId: "x", name: "t", input: {} }]), toolResultMsg([{ callId: "x", content: ["r"] }])]); return true; })(), true);
-check("validateRequest: missing result throws", (() => { try { validateRequest([userText("q"), assistantToolCallMsg("", [{ callId: "x", name: "t", input: {} }]), userText("next")]); return false; } catch (e) { return /Tool call part must be followed/.test(e.message); } })(), true);
+const missingResult = captureConsole("error", () => { try { validateRequest([userText("q"), assistantToolCallMsg("", [{ callId: "x", name: "t", input: {} }]), userText("next")]); return false; } catch (e) { return /Tool call part must be followed/.test(e.message); } });
+check("validateRequest: missing result throws", missingResult.result, true);
+check("validateRequest: missing result throws — one error line captured", missingResult.lines.length, 1);
 check("validateRequest: assistant without tool calls needs nothing", (() => { validateRequest([userText("q"), assistantText("a"), userText("b")]); return true; })(), true);
 
 // --- isToolResultPart ---
