@@ -27,13 +27,13 @@
 | --- | --- |
 | `test/vscode_shim/index.cjs` | Minimal `vscode` module: part classes, enums, `MarkdownString`, `EventEmitter`, recordable `window` / `commands` / `workspace` / `env` / `lm` / `extensions`; `__shim` control object (`calls`, `answers`, `reset`, `installThinkingPart`). |
 | `test/vscode_shim/register.cjs` | `--require` preload mapping the bare specifier `vscode` to `index.cjs`. |
-| `test/run_adapter_tests.mjs` | Runs every `test/adapter_*.mjs` with the preload, sequentially; non-zero exit on first failure. |
+| `test/run_tests.mjs` | `node test/run_tests.mjs unit` runs every `test/unit_*.mjs` in plain Node; `node test/run_tests.mjs adapter` runs every `test/adapter_*.mjs` with the shim preload. Alphabetical, fail-fast. Adding a suite needs no `package.json` edit. |
 | `test/helpers/check.mjs` | `check`, `checkDeep`, `checkMatch`, `summary` — shared assertion/summary with the existing output format. |
 | `test/helpers/fakes.mjs` | `vscode` / `shim` access from ESM, fake host objects, `sseStream` / `hangingStream`, fetch stubbing (`stubFetch`, `onFetch`, `resetFetch`, `balanceJson`, `sseResponse`), `makeProvider`, `runTurn`, message builders. |
 | `test/adapter_smoke.mjs` | Proves the preload chain (Task 1). |
 | `test/unit_model_catalog.mjs`, `test/unit_manifest.mjs`, `test/unit_tool_payload.mjs` | Pure-module additions. |
 | `test/adapter_convert_messages.mjs`, `test/adapter_request_golden.mjs`, `test/adapter_provider_reasoning.mjs`, `test/adapter_provider_stream.mjs`, `test/adapter_provider_request.mjs`, `test/adapter_provider_info.mjs`, `test/adapter_extension_activate.mjs` | Adapter suites. |
-| `package.json` | `test:adapter`, `test:coverage` scripts; `c8` devDependency; `test:unit` gains the three new pure suites. |
+| `package.json` | `test:unit` / `test:adapter` become the glob runner; `test:coverage`; `c8` devDependency. |
 | `.github/workflows/ci.yml` | Coverage report step. |
 | `CONTRIBUTING.md`, `ARCHITECTURE.md`, `CHANGELOG.md` | Test-strategy docs. |
 
@@ -44,11 +44,11 @@
 **Files:**
 - Create: `test/vscode_shim/index.cjs`
 - Create: `test/vscode_shim/register.cjs`
-- Create: `test/run_adapter_tests.mjs`
+- Create: `test/run_tests.mjs`
 - Create: `test/helpers/check.mjs`
 - Create: `test/helpers/fakes.mjs`
 - Create: `test/adapter_smoke.mjs`
-- Modify: `package.json` (scripts `test:adapter`, `test`)
+- Modify: `package.json` (scripts `test:unit`, `test:adapter`, `test`)
 
 **Interfaces:**
 - Produces `vscode.__shim`: `{ calls: { showErrorMessage: Array<{message, items}>, showWarningMessage, showInformationMessage, showInputBox: Array<opts>, setStatusBarMessage: Array<{text, ms}>, executeCommand: Array<{id, args}>, registerCommand: string[], registerProvider: Array<{vendor, provider}>, openExternal: string[], withProgress: Array<opts> }, answers: { showErrorMessage, showWarningMessage, showInformationMessage, showInputBox, getConfiguration: Record<section, Record<key, value>>, getCommands: string[], extension }, registeredCommands: Map<string, Function>, outputChannels: FakeOutputChannel[], statusBarItems: FakeStatusBarItem[], reset(): void, installThinkingPart(): void, removeThinkingPart(): void }`.
@@ -386,36 +386,42 @@ Module._resolveFilename = function resolveWithShim(request, ...rest) {
 };
 ```
 
-- [ ] **Step 3: Write `test/run_adapter_tests.mjs`**
+- [ ] **Step 3: Write `test/run_tests.mjs`**
 
 ```js
-// Runs every test/adapter_*.mjs under the vscode shim preload, in order.
-// Fails fast: the first non-zero exit ends the run with that code.
+// Runs one family of suites in alphabetical order, fail-fast:
+//   node test/run_tests.mjs unit     → test/unit_*.mjs    (plain Node, no vscode)
+//   node test/run_tests.mjs adapter  → test/adapter_*.mjs (vscode shim preload)
+// Adding a suite is just adding a file — no package.json edit.
 import { readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+const family = process.argv[2];
+if (family !== "unit" && family !== "adapter") {
+	console.error("usage: node test/run_tests.mjs <unit|adapter>");
+	process.exit(2);
+}
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const files = readdirSync(testDir)
-	.filter((f) => /^adapter_.*\.mjs$/.test(f))
+	.filter((f) => f.startsWith(`${family}_`) && f.endsWith(".mjs"))
 	.sort();
 if (files.length === 0) {
-	console.error("run_adapter_tests: no test/adapter_*.mjs files found");
+	console.error(`run_tests: no test/${family}_*.mjs files found`);
 	process.exit(1);
 }
+const preload = family === "adapter" ? ["--require", path.join(testDir, "vscode_shim", "register.cjs")] : [];
 for (const f of files) {
 	console.log(`\n### ${f}`);
-	const r = spawnSync(process.execPath, ["--require", path.join(testDir, "vscode_shim", "register.cjs"), path.join(testDir, f)], {
-		stdio: "inherit",
-	});
+	const r = spawnSync(process.execPath, [...preload, path.join(testDir, f)], { stdio: "inherit" });
 	if (r.status !== 0) {
-		console.error(`run_adapter_tests: ${f} exited with ${r.status}`);
+		console.error(`run_tests: ${f} exited with ${r.status}`);
 		process.exit(r.status ?? 1);
 	}
 }
-console.log(`\nrun_adapter_tests: ${files.length} adapter suites passed`);
+console.log(`\nrun_tests: ${files.length} ${family} suites passed`);
 ```
 
 - [ ] **Step 4: Write `test/helpers/check.mjs`**
@@ -478,7 +484,7 @@ export function summary(suiteName = "") {
 
 ```js
 // Fakes for the adapter suites. Must be imported under the shim preload
-// (test/run_adapter_tests.mjs does that); `vscode` here is the shim.
+// (`node test/run_tests.mjs adapter` does that); `vscode` here is the shim.
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -753,21 +759,26 @@ check("removeThinkingPart hides it again", vscode.LanguageModelThinkingPart, und
 summary("adapter_smoke");
 ```
 
-- [ ] **Step 7: Add the scripts to `package.json`**
+- [ ] **Step 7: Switch the scripts in `package.json` to the runner**
 
-Change `"test": "npm run test:unit"` to:
+Replace the existing `test` and `test:unit` scripts (the 13-item `&&` chain) with, and add `test:adapter`:
 
 ```json
 "test": "npm run test:unit && npm run test:adapter",
-"test:adapter": "node test/run_adapter_tests.mjs",
+"test:unit": "node test/run_tests.mjs unit",
+"test:adapter": "node test/run_tests.mjs adapter",
 ```
+
+(`pretest` stays `npm run compile`.) The runner picks up the same 13 existing `unit_*.mjs` files alphabetically.
 
 - [ ] **Step 8: Run the smoke test directly and through the runner**
 
 Run: `npm run compile && node --require ./test/vscode_shim/register.cjs test/adapter_smoke.mjs`
 Expected: 6 ✓, `=== Results: 6 passed, 0 failed ===`.
+Run: `npm run test:unit`
+Expected: the 13 existing suites each print their results; `run_tests: 13 unit suites passed`.
 Run: `npm run test:adapter`
-Expected: `### adapter_smoke.mjs` … `run_adapter_tests: 1 adapter suites passed`.
+Expected: `### adapter_smoke.mjs` … `run_tests: 1 adapter suites passed`.
 
 - [ ] **Step 9: Verify the harness detects failure**
 
@@ -778,8 +789,8 @@ Temporarily change the smoke test's first expected value to `false`, run again, 
 ```bash
 npx prettier --write test/vscode_shim/index.cjs test/vscode_shim/register.cjs
 npx prettier --check . && npm test
-git add test/vscode_shim test/helpers test/run_adapter_tests.mjs test/adapter_smoke.mjs package.json
-git commit -m "test: vscode shim preload, adapter runner and shared helpers for adapter suites"
+git add test/vscode_shim test/helpers test/run_tests.mjs test/adapter_smoke.mjs package.json
+git commit -m "test: vscode shim preload, suite runner and shared helpers for adapter suites"
 ```
 
 ---
@@ -841,8 +852,7 @@ git commit -m "test: c8 coverage report (devDependency) and CI step"
 ### Task 3: `test/unit_model_catalog.mjs` (pure)
 
 **Files:**
-- Create: `test/unit_model_catalog.mjs`
-- Modify: `package.json` (`test:unit` chain)
+- Create: `test/unit_model_catalog.mjs` (picked up automatically by `node test/run_tests.mjs unit`)
 
 - [ ] **Step 1: Write the test**
 
@@ -884,19 +894,15 @@ check("thinking ids carry the ::thinking suffix", MODEL_VARIANTS.every((v) => v.
 summary("unit_model_catalog");
 ```
 
-- [ ] **Step 2: Wire into `test:unit`**
-
-Append ` && node test/unit_model_catalog.mjs` to the `test:unit` script.
-
-- [ ] **Step 3: Run**
+- [ ] **Step 2: Run**
 
 Run: `npm run compile && node test/unit_model_catalog.mjs`
 Expected: all ✓ (6 + 6×3 + 4 = 28 checks), exit 0.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-npm test && git add test/unit_model_catalog.mjs package.json && git commit -m "test: pin the frozen model catalog (ids, API names, flags, budgets)"
+npm test && git add test/unit_model_catalog.mjs && git commit -m "test: pin the frozen model catalog (ids, API names, flags, budgets)"
 ```
 
 ---
@@ -904,8 +910,7 @@ npm test && git add test/unit_model_catalog.mjs package.json && git commit -m "t
 ### Task 4: `test/unit_manifest.mjs` (pure)
 
 **Files:**
-- Create: `test/unit_manifest.mjs`
-- Modify: `package.json` (`test:unit` chain)
+- Create: `test/unit_manifest.mjs` (picked up automatically by `node test/run_tests.mjs unit`)
 
 - [ ] **Step 1: Write the test**
 
@@ -986,7 +991,7 @@ summary("unit_manifest");
 
 - [ ] **Step 2: Confirm the `.vscodeignore` lines exist verbatim** (`src/**`, `test/**` may be spelled differently — open the file; if a pattern differs, use the file's exact spelling in the test, do not change `.vscodeignore`).
 
-- [ ] **Step 3: Wire into `test:unit`** (append ` && node test/unit_manifest.mjs`) and run
+- [ ] **Step 3: Run**
 
 Run: `npm run compile && node test/unit_manifest.mjs`
 Expected: all ✓, exit 0.
@@ -994,7 +999,7 @@ Expected: all ✓, exit 0.
 - [ ] **Step 4: Commit**
 
 ```bash
-npm test && git add test/unit_manifest.mjs package.json && git commit -m "test: pin the package.json contract and persisted identifiers"
+npm test && git add test/unit_manifest.mjs && git commit -m "test: pin the package.json contract and persisted identifiers"
 ```
 
 ---
@@ -1002,8 +1007,7 @@ npm test && git add test/unit_manifest.mjs package.json && git commit -m "test: 
 ### Task 5: `test/unit_tool_payload.mjs` (pure)
 
 **Files:**
-- Create: `test/unit_tool_payload.mjs`
-- Modify: `package.json` (`test:unit` chain)
+- Create: `test/unit_tool_payload.mjs` (picked up automatically by `node test/run_tests.mjs unit`)
 
 - [ ] **Step 1: Write the test**
 
@@ -1085,7 +1089,7 @@ check("unusable entries skipped, usable kept", skipped.tools.length, 1);
 summary("unit_tool_payload");
 ```
 
-- [ ] **Step 2: Wire into `test:unit`** (append ` && node test/unit_tool_payload.mjs`) and run
+- [ ] **Step 2: Run**
 
 Run: `npm run compile && node test/unit_tool_payload.mjs`
 Expected: all ✓. If any sanitization expectation differs from the real output, **read `src/tool_payload.ts` and fix the expectation** (this test documents current behaviour; it must not change production code).
@@ -1093,7 +1097,7 @@ Expected: all ✓. If any sanitization expectation differs from the real output,
 - [ ] **Step 3: Commit**
 
 ```bash
-npm test && git add test/unit_tool_payload.mjs package.json && git commit -m "test: pin tool payload schema sanitization and tool_choice passthrough"
+npm test && git add test/unit_tool_payload.mjs && git commit -m "test: pin tool payload schema sanitization and tool_choice passthrough"
 ```
 
 ---
@@ -2142,7 +2146,7 @@ Three layers, all run by `npm test` from the compiled `out/`:
   protocol-layer invariants: the serialized request body (golden), SSE
   rules, fingerprint and wire-alias algorithms, tool payload sanitization,
   the model catalog, and the package.json contract (`unit_manifest.mjs`).
-- **Adapter suites** (`test/adapter_*.mjs`, run by `test/run_adapter_tests.mjs`
+- **Adapter suites** (`test/adapter_*.mjs`, run by `node test/run_tests.mjs adapter`
   with `node --require test/vscode_shim/register.cjs`) exercise the real
   `out/utils.js`, `out/provider.js` and `out/extension.js` against a
   minimal hand-written `vscode` (`test/vscode_shim/index.cjs`): part

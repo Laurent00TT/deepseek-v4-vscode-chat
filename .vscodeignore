@@ -24,6 +24,7 @@ eslint.config.mjs
 .gitignore
 docs/**
 .claude/**
+.superpowers/**
 .git-blame-ignore-revs
 
 # Build artifacts kept out of the package
