@@ -71,7 +71,7 @@ Integration tests hit the live API and need a funded key — they are NOT in
 CI and are the final word on protocol questions:
 
 ```bash
-DEEPSEEK_API_KEY=sk-... node test/integration_tools_present.mjs  # the strict reasoning rule
+DEEPSEEK_API_KEY=sk-... node test/integration_tools_present.mjs  # reasoning round-trip rules (reports how strict the server is today)
 DEEPSEEK_API_KEY=sk-... node test/integration_vision.mjs         # multimodal wire shape
 DEEPSEEK_API_KEY=sk-... node test/integration_vision_multiturn.mjs # vision + tools + reasoning over three turns; records image prompt-cache hits
 ```

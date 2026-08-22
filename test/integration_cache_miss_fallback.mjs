@@ -1,13 +1,15 @@
-// Integration test: verify that reasoning_content="" fallback prevents 400.
+// Integration test: verify that the reasoning_content="" fallback is accepted.
 //
-// DeepSeek thinking mode requires every prior assistant turn to carry
-// reasoning_content. When the ReasoningCache misses (empty CoT, eviction,
-// fingerprint mismatch), the extension now sets reasoning_content="" as
-// fallback instead of omitting the field entirely.
+// DeepSeek's thinking-mode docs require every prior assistant turn to carry
+// reasoning_content when tools are present. When the ReasoningCache misses
+// (empty CoT, eviction, fingerprint mismatch), the extension sets
+// reasoning_content="" as fallback instead of omitting the field entirely.
 //
 // This test validates three scenarios in sequence:
 //   A. (positive ctrl) Turn 2 WITH original reasoning_content → 200
-//   B. (reproduce bug) Turn 2 WITHOUT reasoning_content       → 400
+//   B. (informational) Turn 2 WITHOUT reasoning_content → records 400 vs
+//      accepted. This was a hard 400 until mid-2026; from 2026-08-22 the
+//      live server was observed to accept it (see integration_round_trip).
 //   C. (verify fix)    Turn 2 WITH reasoning_content=""       → 200
 //
 // Usage:
@@ -201,7 +203,14 @@ async function main() {
     true
   );
   const rB = await chatOnce(bodyB, "B. WITHOUT reasoning");
-  assert(rB.status === 400, "B: WITHOUT reasoning → 400 (bug reproduced)");
+  // Informational since 2026-08-22: the server was observed to ACCEPT this
+  // shape. Record, don't fail — scenario C (what the extension actually
+  // sends on a cache miss) is the hard check.
+  if (rB.status === 400) {
+    console.log("  ℹ B: WITHOUT reasoning → 400 (strict rule enforced today)");
+  } else {
+    console.log(`  ℹ B: WITHOUT reasoning → ${rB.status} (server lenient today; the "" fallback stays as the conservative choice)`);
+  }
 
   // --- Scenario C: WITH reasoning_content="" (verify the fix) ---
   const bodyC = mkBody(

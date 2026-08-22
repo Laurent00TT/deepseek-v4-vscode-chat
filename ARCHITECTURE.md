@@ -180,9 +180,11 @@ Until one of these triggers, the answer stays "no proposed API."
 
 ### Problem
 
-DeepSeek V4 thinking-mode multi-turn rule (originally tight, **server behavior relaxed around 2026-05** based on standalone integration runs in `test/`):
+DeepSeek V4 thinking-mode multi-turn rule — as documented, and as the live server has actually behaved over time (standalone integration runs in `test/`):
 
-> **A prior assistant turn that itself contained `tool_calls` should carry its original `reasoning_content` on the next request.** Other prior assistant turns (plain text replies) used to require it too when `tools` was advertised, but the server now accepts requests that omit it for those turns.
+> **Documented:** with `tools` in the request, every prior assistant turn's `reasoning_content` must be passed back, or the API returns 400 (Thinking Mode guide — still worded this way on 2026-08-22).
+>
+> **Observed:** the server has moved in steps. Originally every turn was enforced; around 2026-05 plain-text turns stopped needing it while tool-call turns still 400'd; on **2026-08-22** every shape we test was accepted without it — tool-call turns and plain turns, with and without `tools`, on `deepseek-v4-pro`, `deepseek-v4-flash` and the Vision model (`integration_round_trip` ×3, `integration_tools_present`, `integration_no_tc_assistant`, `integration_tools_advertised_no_tc`, `integration_cache_miss_fallback`, `integration_vision_multiturn`).
 
 We still attach `reasoning_content` to **every** prior assistant turn we have cache for. Reasons: (a) sending more is harmless, (b) it preserves prompt-cache prefix bytes when the same conversation continues (the prefix must be byte-identical to hit DS server cache), and (c) it future-proofs against the server tightening the rule again.
 
@@ -196,7 +198,7 @@ Forwarding a tool_call turn without restored `reasoning_content` historically tr
 The reasoning_content in the thinking mode must be passed back to the API.
 ```
 
-The 400 is still possible for tool-call turns under strict server modes, so the round-trip mechanism is load-bearing for correctness, not just optimisation.
+As of 2026-08-22 the live server no longer returns it for any shape we test — but the docs still define the rule, so the round-trip mechanism stays, for three reasons: the model otherwise continues each agent turn from a history with its own chain of thought removed; the server prompt-cache prefix is byte-stable only if the same bytes are re-sent; and it keeps working unchanged if DeepSeek re-tightens. Treat the 400 as possible, not as current — the integration scripts report which way the server behaves on the day they run.
 
 ### Solution: local reasoning cache + fingerprint index
 
@@ -373,8 +375,11 @@ Invariants, in decreasing order of importance:
   results never emit image blocks: the Vision guide says images in
   `system`/`assistant` messages return 400, and Chat Completions documents
   `tool` content as a plain string (only the Responses API, which we don't
-  use, allows images in tool outputs — `integration_vision_multiturn.mjs`
-  probes what Chat Completions actually does).
+  use, documents images in tool outputs). `integration_vision_multiturn.mjs`
+  (2026-08-22) found Chat Completions **accepts** an `image_url` block
+  inside a `tool` message as well, so flattening tool results to text is
+  our choice, not an API limit — a candidate for tools that return
+  screenshots.
 - MIME gate: JPEG/PNG/GIF/WebP (declared MIME, normalized —
   `image/jpg` → `image/jpeg`, parameters stripped). Unsupported images are
   dropped with a `console.warn`, never sent — one bad attachment must not
@@ -415,13 +420,17 @@ EN and zh-cn trees). What the docs add beyond what the code already encodes:
   pixels), capped at 384 — the ceiling we budget with.
 - Files API exists and is free: `POST/GET/DELETE /files` (purpose
   `user_data`, 64 MiB per file, expiry 1 h–30 d or permanent), referenced
-  from a user turn as `{ "type": "file", "file_id": "file-api-…" }`. Unused
-  here until `integration_vision_multiturn.mjs` shows whether the re-sent
-  base64 prefix already hits the server prompt cache (the cache page does
-  not mention images either way).
-- The strict rule is official: with `tools` in the request, every prior
-  assistant turn's `reasoning_content` must be passed back or the API
-  returns 400 — the reason attachReasoningToHistory exists.
+  from a user turn as `{ "type": "file", "file_id": "file-api-…" }`. Not
+  used: `integration_vision_multiturn.mjs` (2026-08-22) showed the re-sent
+  base64 image prefix **does** hit the server prompt cache (turn 2: 512 of
+  the prior 499-token prompt cached; turn 3: 512 of 571), so `file_id`
+  reuse would save upload bytes, not tokens — there is no cost case for it.
+  (The cache page does not mention images either way.)
+- The strict rule is still the *documented* one (with `tools`, every prior
+  assistant turn's `reasoning_content` must be passed back or 400) — but
+  the live server stopped enforcing it; see "The core challenge" above for
+  the 2026-08-22 observation. attachReasoningToHistory stays for
+  reasoning continuity and cache-prefix stability.
 - Rate limiting is now a per-model **concurrency** cap (Pro 500 / Flash
   2500 / Vision 2500 in-flight requests per account → 429). While queued
   the server streams `: keep-alive` SSE comment lines (non-`data:` lines,
@@ -507,7 +516,7 @@ Files in `test/integration_*.mjs` hit the live DeepSeek API directly, **bypassin
 
 - `integration_round_trip.mjs` — basic thinking + tool_call round-trip
 - `integration_no_tc_assistant.mjs` — reasoning round-trip rules without `tools`
-- `integration_tools_present.mjs` — **the strict rule with `tools` present** (the corner case this extension is built around)
+- `integration_tools_present.mjs` — **the strict rule with `tools` present** (the corner case this extension is built around; enforced as a 400 until mid-2026, accepted since 2026-08-22 — the script reports which way the server behaves today)
 - `integration_tools_advertised_no_tc.mjs` — reasoning rules when tools are advertised but the turn makes no tool call
 - `integration_cache_miss_fallback.mjs` — the `reasoning_content: ""` stub keeps a conversation alive after a cache miss
 - `integration_vision.mjs` — multimodal content blocks against `deepseek-v4-flash-vision-exp`: generates a solid-red PNG locally and requires the model to *see* it, in both thinking and non-thinking modes

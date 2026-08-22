@@ -55,13 +55,13 @@ DeepSeek 于 2026-08-21 发布了首个多模态模型
 
 ## 本扩展独特解决的问题
 
-通用 OpenAI 兼容桥接器在转发给 DeepSeek 时会丢掉 `reasoning_content` 字段，导致任何启用工具的 thinking 对话在第二轮硬性 400：
+通用 OpenAI 兼容桥接器在转发给 DeepSeek 时会丢掉 `reasoning_content` 字段。DeepSeek thinking 模式文档要求启用工具时每个先前 assistant 轮都带回它，并且直到 2026 年年中服务端都以硬性 400 强制执行——任何启用工具的 thinking 对话第二轮即失败：
 
 ```text
 The reasoning_content in the thinking mode must be passed back to the API.
 ```
 
-本扩展是原生 VS Code Language Model Provider —— 拦截每个请求，从本地缓存恢复先前的 `reasoning_content`，并重新挂载到历史中的每个 assistant 轮（不只是调用过工具的轮——`tools` 存在时 DeepSeek 实际要求的是全部轮）。结果：Agent 循环、多轮重构、长思考会话端到端可用。
+本扩展是原生 VS Code Language Model Provider —— 拦截每个请求，从本地缓存恢复先前的 `reasoning_content`，并重新挂载到历史中的每个 assistant 轮（不只是调用过工具的轮——`tools` 存在时 DeepSeek 实际要求的是全部轮）。结果：Agent 循环、多轮重构、长思考会话端到端可用。（2026-08-22 起实测 API 已接受不带 `reasoning_content` 的历史轮；但往返仍有意义——没有它模型每轮都在一份被抹掉自身思维链的历史上继续；服务端 prompt cache 前缀只有在重发同样字节时才稳定；DeepSeek 一旦收紧规则也无需改动。）
 
 ## 快速开始
 
@@ -101,7 +101,7 @@ The reasoning_content in the thinking mode must be passed back to the API.
 ## 常见问题
 
 **报错 `The reasoning_content in the thinking mode must be passed back to the API`（400）。**
-DeepSeek thinking 模式要求把先前 assistant 轮的推理链传回。本扩展从本地缓存恢复它；报这个错说明会话中某一轮在缓存里没有条目（安装扩展前的历史、缓存被清空、超长会话中被淘汰）。恢复方式：新开会话。诊断：*Show DeepSeek V4 Reasoning Cache Stats*。
+2026-08 起已少见——实测 API 不再因缺少推理链返回此错，但文档仍定义该规则。DeepSeek thinking 模式要求把先前 assistant 轮的推理链传回。本扩展从本地缓存恢复它；报这个错说明会话中某一轮在缓存里没有条目（安装扩展前的历史、缓存被清空、超长会话中被淘汰）。恢复方式：新开会话。诊断：*Show DeepSeek V4 Reasoning Cache Stats*。
 
 **弹出警告 "prompt cache hit rate dropped"。**
 你这个会话在 DeepSeek 服务端的缓存前缀断了（常见于某轮被取消/失败、编辑器重启之后），后续轮次将按更贵的 cache-miss 输入价计费。弹窗里的 *Start New Chat* 止损，*Show Cache Stats* 诊断。背景见 [#19](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/19)。

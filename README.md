@@ -69,13 +69,13 @@ Vision notes:
 
 ## What this plugin uniquely solves
 
-Generic OAI-compatible bridges drop the `reasoning_content` field when forwarding to DeepSeek, which causes a hard 400 on the second turn of any tools-enabled thinking conversation:
+Generic OAI-compatible bridges drop the `reasoning_content` field when forwarding to DeepSeek. DeepSeek's thinking-mode docs require it on every prior assistant turn when tools are present, and until mid-2026 the server enforced that with a hard 400 on the second turn of any tools-enabled thinking conversation:
 
 ```text
 The reasoning_content in the thinking mode must be passed back to the API.
 ```
 
-This extension is a native VS Code Language Model Provider — it intercepts each request, restores the prior `reasoning_content` from a local cache, and re-attaches it to every assistant turn in history (not just the ones that called a tool, which is what DeepSeek actually requires when `tools` is present). Result: agent loops, multi-turn refactors and long thinking sessions work end-to-end.
+This extension is a native VS Code Language Model Provider — it intercepts each request, restores the prior `reasoning_content` from a local cache, and re-attaches it to every assistant turn in history (not just the ones that called a tool, which is what DeepSeek actually requires when `tools` is present). Result: agent loops, multi-turn refactors and long thinking sessions work end-to-end. (Since 2026-08-22 the live API has been observed to accept those turns without `reasoning_content`; the round-trip still matters — without it the model continues each agent turn from a history with its own chain of thought removed, the server prompt-cache prefix stays byte-stable only if the same bytes are re-sent, and it keeps working unchanged if DeepSeek re-tightens the rule.)
 
 ## Quick start
 
@@ -128,9 +128,10 @@ To stop it:
 
 **The chat fails with `The reasoning_content in the thinking mode must be
 passed back to the API` (400).**
-DeepSeek's thinking mode requires prior assistant turns to carry their
-reasoning chain back. This extension restores it from a local cache; the
-error means the cache has no entry for some turn in this conversation
+Rare since 2026-08 — the live API stopped returning this for missing
+reasoning, but the docs still define the rule. DeepSeek's thinking mode
+requires prior assistant turns to carry their reasoning chain back. This
+extension restores it from a local cache; the error means the cache has no entry for some turn in this conversation
 (pre-extension history, a cleared cache, or eviction in a very long
 session). Recovery: start a new chat. Diagnostics: *Show DeepSeek V4
 Reasoning Cache Stats*.
