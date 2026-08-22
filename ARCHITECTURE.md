@@ -388,7 +388,9 @@ Invariants, in decreasing order of importance:
 
 ### Errors and retry
 
-`fetchWithRetry` wraps every API call:
+`fetchWithRetry` (in the vscode-free `src/api_client.ts`, together with the
+endpoint constants and `formatApiError`; the model catalog similarly lives
+in `src/model_catalog.ts`) wraps every API call:
 
 - **Retryable**: 5xx, 429, network errors, timeouts
 - **Non-retryable**: 401, 402, 422, 400, and other 4xx — surface them immediately with actionable notifications

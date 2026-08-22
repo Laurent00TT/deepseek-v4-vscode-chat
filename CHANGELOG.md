@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Model catalog and HTTP layer extracted to leaf modules** (`src/model_catalog.ts`: `MODEL_VARIANTS` + `findVariant`; `src/api_client.ts`: `fetchWithRetry`, `formatApiError`, endpoint constants, `BalanceInfo`) — verified byte-identical moves. Deliberately **left** in provider.ts: `refreshBalance` (its HTTP call interleaves with session-anchor mutation and status-bar refresh — no clean seam), `notifyApiError` and the picker-info assembly (vscode-bound). provider.ts drops from 2,243 to 1,935 lines across this and the SSE extraction.
+
 - **Repo-wide prettier adoption, pinned and CI-enforced.** One-time `prettier --write` pass over the TS sources (semantically neutral — verified by compile, eslint, all unit suites including the `out/provider.js` text pin, and a vsce dry package; compiled string literals unchanged). Prettier is now pinned exactly (`3.8.3`) because formatting drifts across prettier minors, and CI gained a `prettier --check` step so style can no longer drift. The reformat commit is listed in `.git-blame-ignore-revs`, which GitHub's blame view honors natively.
 
 ## [0.3.10] - 2026-08-12

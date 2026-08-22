@@ -22,6 +22,8 @@ import {
 } from "./sse";
 import { IMAGE_TOKENS_PER_IMAGE, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
 import { buildRequestBody, coerceReasoningEffort } from "./request_body";
+import { MODEL_VARIANTS, findVariant } from "./model_catalog";
+import { BASE_URL, BALANCE_URL, fetchWithRetry, formatApiError, type BalanceInfo } from "./api_client";
 import { toWireName, buildWireNameMap } from "./tool_names";
 import { assertAdvertisedToolLimit } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
@@ -37,181 +39,6 @@ const REASONING_CACHE_STATE_KEY = "deepseekv4.reasoningCache";
  * persistReasoningForTurn (which must refuse to fingerprint a turn whose
  * only text is this constant — see the degenerate-anchor comment there). */
 const THINKING_FALLBACK_HINT = "💭 Thinking...\n\n";
-
-const BASE_URL = "https://api.deepseek.com/v1";
-
-/**
- * Model variants exposed to the VS Code model picker.
- *
- * DeepSeek V4 supports 1M context and up to 384K output. Think Max requires
- * at least 384K of context allocated to the reasoning chain to avoid silent
- * truncation, so the thinking-max entry is configured generously.
- *
- * Order matters — VS Code shows the first entry as default. The strongest
- * variant (pro + thinking-max) is intentionally listed first.
- */
-// DS V4's context window is 1M (input + output total). V4's max output is
-// 384K (which subsumes the reasoning chain — `max_tokens` covers both the
-// hidden reasoning_content and the visible content). Thinking variants
-// budget the full 384K so max-effort reasoning chains can't be truncated.
-// Non-thinking variants only emit visible content, so 64K is plenty.
-//
-// Input budgets are sized as `1M - output budget`:
-//   - thinking variants:  1M - 384K = 640K → rounded down to 640K
-//   - non-thinking:        1M - 64K = 960K → rounded down to 960K
-// (We keep slightly conservative rounding to avoid edge-case overflows
-// when the server's tokenizer disagrees with our estimator.)
-//
-// `reasoning_effort` is read from the `deepseekv4.reasoningEffort` user
-// setting at request time, not stored on the variant.
-//
-// Listed strongest→cheapest; VS Code uses the first entry as the default.
-const MODEL_VARIANTS: DeepSeekModelVariant[] = [
-	{
-		id: "deepseek-v4-pro::thinking",
-		displayName: "DeepSeek V4 Pro (thinking)",
-		tooltip: "DeepSeek V4 Pro — strongest, extended thinking",
-		apiModel: "deepseek-v4-pro",
-		thinking: true,
-		maxInputTokens: 655360, // 640K (= 1M - 384K output)
-		maxOutputTokens: 393216, // 384K (covers reasoning chain + visible content)
-	},
-	{
-		id: "deepseek-v4-pro",
-		displayName: "DeepSeek V4 Pro",
-		tooltip: "DeepSeek V4 Pro — strong, no extended thinking, lower latency",
-		apiModel: "deepseek-v4-pro",
-		thinking: false,
-		maxInputTokens: 983040, // 960K (= 1M - 64K output)
-		maxOutputTokens: 65536, // 64K
-	},
-	{
-		id: "deepseek-v4-flash::thinking",
-		displayName: "DeepSeek V4 Flash (thinking)",
-		tooltip: "DeepSeek V4 Flash — cheapest with extended thinking",
-		apiModel: "deepseek-v4-flash",
-		thinking: true,
-		maxInputTokens: 655360, // 640K (= 1M - 384K output)
-		maxOutputTokens: 393216, // 384K
-	},
-	{
-		id: "deepseek-v4-flash",
-		displayName: "DeepSeek V4 Flash",
-		tooltip: "DeepSeek V4 Flash — cheapest, no extended thinking",
-		apiModel: "deepseek-v4-flash",
-		thinking: false,
-		maxInputTokens: 983040, // 960K (= 1M - 64K output)
-		maxOutputTokens: 65536, // 64K
-	},
-	// Vision Exp (released 2026-08-21): experimental multimodal variant of
-	// V4 Flash. Same 1M context / 384K output / dual thinking modes / tool
-	// calling as Flash, plus image input (JPEG/PNG/GIF/WebP, sent as base64
-	// data: URLs in content blocks — see image_content.ts). Billed at Flash
-	// prices; images tokenize at up to 384 tokens each. Listed after the
-	// text variants because it's experimental — users opt in via the picker.
-	{
-		id: "deepseek-v4-flash-vision-exp::thinking",
-		displayName: "DeepSeek V4 Flash Vision (thinking)",
-		tooltip: "DeepSeek V4 Flash Vision (experimental) — image input, extended thinking",
-		apiModel: "deepseek-v4-flash-vision-exp",
-		thinking: true,
-		vision: true,
-		maxInputTokens: 655360, // 640K (= 1M - 384K output)
-		maxOutputTokens: 393216, // 384K
-	},
-	{
-		id: "deepseek-v4-flash-vision-exp",
-		displayName: "DeepSeek V4 Flash Vision",
-		tooltip: "DeepSeek V4 Flash Vision (experimental) — image input, no extended thinking",
-		apiModel: "deepseek-v4-flash-vision-exp",
-		thinking: false,
-		vision: true,
-		maxInputTokens: 983040, // 960K (= 1M - 64K output)
-		maxOutputTokens: 65536, // 64K
-	},
-];
-
-function findVariant(id: string): DeepSeekModelVariant | undefined {
-	return MODEL_VARIANTS.find((v) => v.id === id);
-}
-
-/**
- * Fetch with retry on transient failures (network errors, 5xx, 429).
- * 4xx (except 429) are non-retryable client errors and bubble immediately.
- * Aborts (user cancel) bypass retry.
- *
- * Retries are bounded to attempts=3 with exponential backoff (1s, 2s) so
- * worst case adds ~3s before giving up — well within Copilot's request
- * timeout window.
- *
- * A per-attempt timeout (default 5 min) prevents hangs. DeepSeek's thinking
- * mode with max effort can take 2–5 minutes for complex reasoning chains,
- * and the API itself gives up after 10 minutes of queuing, so 5 min is a
- * reasonable middle ground that avoids both premature cancellation and
- * indefinite hangs.
- */
-async function fetchWithRetry(
-	url: string,
-	init: RequestInit,
-	signal: AbortSignal,
-	logger: (msg: string, data?: unknown) => void,
-	attempts = 3,
-	timeoutMs = 300_000 // 5 min per attempt
-): Promise<Response> {
-	let lastErr: unknown;
-	for (let i = 0; i < attempts; i++) {
-		if (signal.aborted) {
-			throw new DOMException("Aborted", "AbortError");
-		}
-		try {
-			// Combine user cancel signal with per-attempt timeout.
-			// AbortSignal.any() is available in Node 20+ / VS Code 1.104+.
-			const timeoutSignal = AbortSignal.timeout(timeoutMs);
-			const combinedSignal = AbortSignal.any([signal, timeoutSignal]);
-
-			const res = await fetch(url, { ...init, signal: combinedSignal });
-			// Non-retryable: 2xx success, 4xx client errors (except 429 rate limit)
-			if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 429)) {
-				return res;
-			}
-			// Retryable: 5xx server errors, 429 rate limit
-			lastErr = new Error(`HTTP ${res.status} ${res.statusText}`);
-			logger("retry", { attempt: i + 1, status: res.status, willRetry: i < attempts - 1 });
-			// Drain body so the connection can be reused
-			try {
-				await res.text();
-			} catch {
-				/* ignore */
-			}
-		} catch (e) {
-			if ((e as { name?: string })?.name === "AbortError") {
-				// Distinguish user cancel from timeout
-				if (signal.aborted) {
-					throw e; // User cancelled — propagate immediately
-				}
-				// Timeout — log and retry (timeout can be transient)
-				lastErr = new Error(`Request timeout after ${timeoutMs}ms`);
-				logger("retry", {
-					attempt: i + 1,
-					error: `timeout ${timeoutMs}ms`,
-					willRetry: i < attempts - 1,
-				});
-			} else {
-				lastErr = e;
-				logger("retry", {
-					attempt: i + 1,
-					error: e instanceof Error ? e.message : String(e),
-					willRetry: i < attempts - 1,
-				});
-			}
-		}
-		if (i < attempts - 1) {
-			const delayMs = 1000 * Math.pow(2, i);
-			await new Promise((r) => setTimeout(r, delayMs));
-		}
-	}
-	throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-}
 
 /**
  * Session cost is computed by diffing /user/balance before vs after each
@@ -236,17 +63,6 @@ async function fetchWithRetry(
  * surfaced in the status bar and tooltip — that part doesn't depend on
  * pricing.
  */
-
-/** Snapshot of `/user/balance`. Refreshed only on user demand. */
-interface BalanceInfo {
-	currency: string;
-	totalBalance: number;
-	grantedBalance: number;
-	toppedUpBalance: number;
-	fetchedAt: number;
-}
-
-const BALANCE_URL = "https://api.deepseek.com/user/balance";
 
 /** 24-hour HH:MM:SS, padded — independent of OS locale. */
 function formatTime24(timestamp: number): string {
@@ -414,29 +230,6 @@ async function notifyApiError(status: number, summary: string): Promise<void> {
 			return;
 		}
 	}
-}
-
-/**
- * Render a DeepSeek API error response into a single readable line, preferring
- * the structured `error.message` field when present so the user sees the
- * actual cause instead of a wall of JSON.
- */
-function formatApiError(status: number, statusText: string, body: string): string {
-	const head = `DeepSeek API error: ${status} ${statusText}`;
-	if (!body) {
-		return head;
-	}
-	try {
-		const parsed = JSON.parse(body) as { error?: { message?: string; code?: string; type?: string } };
-		const errMsg = parsed?.error?.message;
-		if (typeof errMsg === "string" && errMsg) {
-			const code = parsed.error?.code ? ` [${parsed.error.code}]` : "";
-			return `${head}${code}: ${errMsg}`;
-		}
-	} catch {
-		/* fall through to raw body */
-	}
-	return `${head}\n${body}`;
 }
 
 /**
