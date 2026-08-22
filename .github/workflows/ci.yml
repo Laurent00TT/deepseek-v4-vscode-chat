@@ -34,6 +34,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Coverage report
+        run: npm run test:coverage
+
       - name: vsce package (sanity check)
         run: npx @vscode/vsce package -o /tmp/extension.vsix
 

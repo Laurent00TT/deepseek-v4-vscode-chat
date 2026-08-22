@@ -30,6 +30,7 @@ docs/**
 # Build artifacts kept out of the package
 **/*.map
 *.vsix
+coverage/**
 
 # Markdown — keep only the user-facing ones
 *.md
