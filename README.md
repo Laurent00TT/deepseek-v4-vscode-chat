@@ -1,13 +1,14 @@
 # DeepSeek V4 for Copilot Chat
 
-Native DeepSeek V4 (Pro / Flash) provider for VS Code Copilot Chat — with full extended-thinking support, agent-mode tool calling, and built-in cost tracking.
+Native DeepSeek V4 (Pro / Flash / Flash Vision) provider for VS Code Copilot Chat — with full extended-thinking support, agent-mode tool calling, native multimodal image input, and built-in cost tracking.
 
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.106%2B-blue)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 ## Features
 
-- Four model variants in the Copilot model picker: **Pro (thinking)**, **Pro**, **Flash (thinking)**, **Flash**
+- Six model variants in the Copilot model picker: **Pro (thinking)**, **Pro**, **Flash (thinking)**, **Flash**, **Flash Vision (thinking)**, **Flash Vision**
+- Native image input on the Vision variants (`deepseek-v4-flash-vision-exp`) — attach screenshots/images in Copilot Chat and DeepSeek sees the actual pixels, no proxy model in between
 - Extended thinking with configurable effort (`high` / `max`, see [Settings](#settings)) and full reasoning chain preserved across multi-turn agent loops
 - Agent-mode tool calling that does not break on the second turn
 - Status bar with live account balance and session spend (auto-detects CNY / USD)
@@ -20,24 +21,34 @@ Native DeepSeek V4 (Pro / Flash) provider for VS Code Copilot Chat — with full
 - Adaptive token estimator (EMA-calibrated chars/token from real `usage` data)
 - First-run walkthrough and a "key required" warning state in the picker so the model entries are always discoverable
 
-## Text-only, by design
+## Native vision, no proxy
 
-DeepSeek V4 is in preview and only accepts text input. A common workaround
-in other extensions is a "vision proxy": when you drop an image into chat,
-it gets forwarded to a different multimodal model (GPT-4o, Claude, etc.)
-and the resulting description is fed to DeepSeek as if it had seen the
-picture.
+DeepSeek shipped its first multimodal model on 2026-08-21 —
+[`deepseek-v4-flash-vision-exp`](https://api-docs.deepseek.com/news/news260821/),
+an experimental Vision variant of V4 Flash — and this provider supports it
+natively. Pick a **Flash Vision** variant in the model picker and attach
+images in Copilot Chat: they are sent to DeepSeek as base64 `data:` URLs in
+the API's multimodal content blocks, so the model sees the actual pixels.
 
-We deliberately do not do this. The proxy introduces a silent fidelity
-gap — DeepSeek answers based on another model's description of the image,
-not the image itself. Any hallucination, omission, or bias in the
-intermediate description leaks straight into DeepSeek's reply, and the UI
-gives the user no signal that the model never actually saw what they
-attached.
+What earlier versions of this README promised still holds: we never route
+your images through a "vision proxy" (a different multimodal model that
+describes the picture to DeepSeek). On the Vision variants DeepSeek sees
+the image itself; on the text-only variants image attachments are dropped
+with a warning in the log — never silently paraphrased by another model.
 
-When DeepSeek itself ships native multimodal support, we will enable it
-through this provider. Until then, image attachments are intentionally
-unsupported here.
+Vision notes:
+
+- Supported formats: JPEG, PNG, GIF, WebP (DeepSeek sniffs the real format
+  from the bytes; unsupported attachments are dropped with a log warning
+  rather than failing the whole request).
+- Each image is billed at up to 384 tokens, at the same price as Flash.
+- The API caps request bodies at 48 MiB (base64 counts toward it); the
+  extension pre-checks this and tells you to attach fewer/smaller images
+  instead of surfacing an opaque server error.
+- Extended thinking, agent-mode tool calling, and the reasoning-cache
+  round-trip all work on the Vision variants exactly as on Flash.
+- The model is experimental (`-exp`) on DeepSeek's side; expect the
+  occasional rough edge until they promote it to stable.
 
 ## What this plugin uniquely solves
 

@@ -12,6 +12,7 @@ import {
 import type { DeepSeekModelVariant, OpenAIChatMessage } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
+import { IMAGE_TOKENS_PER_IMAGE, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
 import { toWireName, buildWireNameMap } from "./tool_names";
 import { assertAdvertisedToolLimit } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
@@ -90,6 +91,32 @@ const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 		tooltip: "DeepSeek V4 Flash — cheapest, no extended thinking",
 		apiModel: "deepseek-v4-flash",
 		thinking: false,
+		maxInputTokens: 983040,   // 960K (= 1M - 64K output)
+		maxOutputTokens: 65536,   // 64K
+	},
+	// Vision Exp (released 2026-08-21): experimental multimodal variant of
+	// V4 Flash. Same 1M context / 384K output / dual thinking modes / tool
+	// calling as Flash, plus image input (JPEG/PNG/GIF/WebP, sent as base64
+	// data: URLs in content blocks — see image_content.ts). Billed at Flash
+	// prices; images tokenize at up to 384 tokens each. Listed after the
+	// text variants because it's experimental — users opt in via the picker.
+	{
+		id: "deepseek-v4-flash-vision-exp::thinking",
+		displayName: "DeepSeek V4 Flash Vision (thinking)",
+		tooltip: "DeepSeek V4 Flash Vision (experimental) — image input, extended thinking",
+		apiModel: "deepseek-v4-flash-vision-exp",
+		thinking: true,
+		vision: true,
+		maxInputTokens: 655360,   // 640K (= 1M - 384K output)
+		maxOutputTokens: 393216,  // 384K
+	},
+	{
+		id: "deepseek-v4-flash-vision-exp",
+		displayName: "DeepSeek V4 Flash Vision",
+		tooltip: "DeepSeek V4 Flash Vision (experimental) — image input, no extended thinking",
+		apiModel: "deepseek-v4-flash-vision-exp",
+		thinking: false,
+		vision: true,
 		maxInputTokens: 983040,   // 960K (= 1M - 64K output)
 		maxOutputTokens: 65536,   // 64K
 	},
@@ -1100,6 +1127,30 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		return total;
 	}
 
+	/**
+	 * Count image attachments across USER turns — the only place the wire
+	 * conversion emits image blocks. Uses the same structural detection as
+	 * convertMessages (mimeType `image/*` + Uint8Array data) so the estimate
+	 * counts exactly the parts that will be sent. Char-based estimation
+	 * doesn't work for images, so they are budgeted separately at the fixed
+	 * IMAGE_TOKENS_PER_IMAGE ceiling.
+	 */
+	private countImageParts(msgs: readonly vscode.LanguageModelChatMessage[]): number {
+		let count = 0;
+		for (const m of msgs) {
+			if (m.role !== vscode.LanguageModelChatMessageRole.User) {
+				continue;
+			}
+			for (const part of m.content) {
+				const obj = part as { mimeType?: unknown; data?: unknown };
+				if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("image/") && obj.data instanceof Uint8Array) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
 	/** Concatenated text of a single chat message (text parts only). */
 	private messageText(m: vscode.LanguageModelChatMessage | undefined): string {
 		if (!m) {
@@ -1201,7 +1252,9 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			maxOutputTokens: v.maxOutputTokens,
 			capabilities: {
 				toolCalling: true,
-				imageInput: false,
+				// Vision variants accept image attachments; Copilot Chat only
+				// enables the attach-image UI when this is true.
+				imageInput: v.vision === true,
 			},
 			// @non-public LanguageModelChatInformation fields used by Copilot
 			// Chat's model picker. Same shape used by Copilot's built-in
@@ -1293,7 +1346,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				throw new Error(`Unknown DeepSeek model variant: ${model.id}`);
 			}
 
-            const openaiMessages = convertMessages(messages);
+            const openaiMessages = convertMessages(messages, { imageInput: variant.vision === true });
             this.log("request.history", {
                 modelId: model.id,
                 count: openaiMessages.length,
@@ -1369,7 +1422,13 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             // callback, polluting the EMA estimator with the wrong request's
             // size.
             const requestInputChars = messageChars + toolChars;
-            const inputTokenCount = Math.ceil(messageChars / this._charsPerToken);
+            // Images bypass the char-based estimator: each is billed at up to
+            // 384 tokens regardless of byte size. Counted only for vision
+            // variants — everywhere else convertMessages drops them.
+            const imageTokenCount = variant.vision === true
+                ? this.countImageParts(messages) * IMAGE_TOKENS_PER_IMAGE
+                : 0;
+            const inputTokenCount = Math.ceil(messageChars / this._charsPerToken) + imageTokenCount;
             const toolTokenCount = Math.ceil(toolChars / this._charsPerToken);
             const tokenLimit = Math.max(1, model.maxInputTokens);
             // Publish a pre-request estimate so the QuickPick (and any
@@ -1452,6 +1511,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			if (toolConfig.tool_choice) {
 				(requestBody as Record<string, unknown>).tool_choice = toolConfig.tool_choice;
 			}
+			// Serialize once: reused for the size guard and the fetch body.
+			// DeepSeek caps the request body at 48 MiB, and base64 image
+			// payloads are what realistically get near it — the token
+			// pre-check can pass (images are ~384 tokens each) while the
+			// encoded bytes blow the transport cap. Catch it locally with an
+			// actionable message instead of surfacing an opaque server 4xx.
+			const bodyJson = JSON.stringify(requestBody);
+			if (bodyJson.length > MAX_REQUEST_BODY_BYTES) {
+				const sizeMiB = (bodyJson.length / (1024 * 1024)).toFixed(1);
+				this.log("request.too_large", { bytes: bodyJson.length, limit: MAX_REQUEST_BODY_BYTES });
+				const detail = variant.vision
+					? `Request body is ${sizeMiB} MiB — over DeepSeek's 48 MiB limit. Attach fewer or smaller images, or start a new chat.`
+					: `Request body is ${sizeMiB} MiB — over DeepSeek's 48 MiB limit. Start a new chat or shorten the conversation.`;
+				void vscode.window.showErrorMessage(`DeepSeek request too large. ${detail}`);
+				throw new Error(`Request body exceeds DeepSeek's 48 MiB limit (${sizeMiB} MiB).`);
+			}
 			const abort = new AbortController();
 			const cancelSub = token.onCancellationRequested(() => abort.abort());
 			let response: Response;
@@ -1465,7 +1540,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 							"Content-Type": "application/json",
 							"User-Agent": this.userAgent,
 						},
-						body: JSON.stringify(requestBody),
+						body: bodyJson,
 						signal: abort.signal,
 					},
 					abort.signal,
@@ -1492,7 +1567,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				// prompt_tokens for this request's input chars. We use the
 				// local `requestInputChars` captured before fetch — NOT an
 				// instance field — to stay correct under concurrent calls.
-				this.calibrateCharsPerToken(requestInputChars, usage.prompt_tokens);
+				// Image tokens are subtracted first: they contribute prompt
+				// tokens without contributing chars, so leaving them in would
+				// drag the chars/token ratio down on every multimodal turn.
+				this.calibrateCharsPerToken(
+					requestInputChars,
+					usage.prompt_tokens !== undefined
+						? Math.max(0, usage.prompt_tokens - imageTokenCount)
+						: undefined,
+				);
 				this._sessionRequestCount += 1;
 				const promptTotal = usage.prompt_tokens ?? 0;
 				const cacheHit = usage.prompt_cache_hit_tokens ?? 0;
@@ -1646,6 +1729,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		for (const part of text.content) {
 			if (part instanceof vscode.LanguageModelTextPart) {
 				total += this.estimateText(part.value);
+			} else {
+				// Image attachments bill at up to 384 tokens each on the Vision
+				// variants — budget them at the ceiling so the host's prompt
+				// planning never under-counts. Same structural detection as
+				// countImageParts.
+				const obj = part as { mimeType?: unknown; data?: unknown };
+				if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("image/") && obj.data instanceof Uint8Array) {
+					total += IMAGE_TOKENS_PER_IMAGE;
+				}
 			}
 		}
 		return total;
@@ -2042,8 +2134,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
             if (msg.reasoning_content) {
                 continue;
             }
+            // contentText flattens the (string | block-array) union; assistant
+            // turns are always plain strings by construction, but the type is
+            // shared with multimodal user turns since the Vision variants.
             const fp = fingerprintAssistantTurn({
-                text: msg.content ?? "",
+                text: contentText(msg.content),
                 toolCalls: (msg.tool_calls ?? []).map((tc) => ({
                     id: tc.id,
                     name: tc.function.name,
@@ -2068,7 +2163,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
                     fp,
                     mode: fp.slice(0, 2),
                     toolCalls: tcSummary,
-                    contentLen: msg.content?.length ?? 0,
+                    contentLen: contentText(msg.content).length,
                     cacheKeys: this._reasoningCache.keys(),
                 });
             }
