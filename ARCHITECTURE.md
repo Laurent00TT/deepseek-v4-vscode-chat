@@ -468,6 +468,7 @@ Files in `test/integration_*.mjs` hit the live DeepSeek API directly, **bypassin
 - `integration_tools_advertised_no_tc.mjs` — reasoning rules when tools are advertised but the turn makes no tool call
 - `integration_cache_miss_fallback.mjs` — the `reasoning_content: ""` stub keeps a conversation alive after a cache miss
 - `integration_vision.mjs` — multimodal content blocks against `deepseek-v4-flash-vision-exp`: generates a solid-red PNG locally and requires the model to *see* it, in both thinking and non-thinking modes
+- `integration_vision_multiturn.mjs` — the agent-mode interactions `integration_vision.mjs` leaves open: a three-turn Vision + tools + thinking round-trip with the history shapes the extension actually sends (block-array user turn, assistant tool_call + `reasoning_content`, tool result). Hard checks: the model tool-calls with the image's color and every history shape is accepted. Recorded (informational): whether the re-sent image prefix hits the server prompt cache (`usage.prompt_cache_hit_tokens` vs the prior prompt size — the fact that decides whether Files API `file_id` reuse is worth anything), whether Vision enforces the strict `reasoning_content` rule, and whether a `tool`-role message may carry an image block
 
 Run locally:
 
