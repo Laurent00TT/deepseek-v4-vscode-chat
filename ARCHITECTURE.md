@@ -512,7 +512,8 @@ Pending timers are cleared in `dispose()` to avoid late callbacks against torn-d
 
 ## Test strategy
 
-Three layers, all run by `npm test` from the compiled `out/`:
+Two layers run by `npm test` from the compiled `out/`, plus the live
+integration scripts:
 
 - **Pure-module unit suites** (`test/unit_*.mjs`) import `../out/*.js` in
   plain Node; nothing in their import chain touches `vscode`. They pin the

@@ -56,7 +56,11 @@ The shim may grow new APIs the adapters use, never behaviour VS Code does
 not have — it records calls and returns preset answers, nothing else.
 provider.ts keeps the host-coupled seams: progress emission,
 dialogs, config reads, the stream reader loop, the `finally`-path reasoning
-persist. When you add logic, put the decision in a pure module and the
+persist. Note that the adapter suites reach TypeScript-`private` provider
+members (`_reasoningCache`, `attachReasoningToHistory`, `_charsPerToken`, …)
+as the plain JS properties they compile to, so renaming one breaks tests
+without the compiler saying a word — grep `test/adapter_*.mjs` when you do.
+When you add logic, put the decision in a pure module and the
 side effect in the adapter, and never import a vscode-tainted module (like
 `utils.ts`) from a pure one — it breaks the test import chain.
 
