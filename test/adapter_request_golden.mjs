@@ -1,31 +1,18 @@
-// End-to-end golden: VS Code history → convertMessages → reasoning attach →
-// buildRequestBody → JSON.stringify, compared byte-for-byte. This is the
-// upgrade gate for the wire: it sits above unit_request_body (which starts
-// from already-converted messages) and pins the adapter + body together.
-// If it fails, the change is a deliberate, CHANGELOG-worthy wire change or a
-// bug — there is no third option.
+// End-to-end golden: VS Code history → convertMessages → the REAL
+// provider.attachReasoningToHistory → buildRequestBody → JSON.stringify,
+// compared byte-for-byte. This is the upgrade gate for the wire: it sits
+// above unit_request_body (which starts from already-converted messages) and
+// pins the adapter + body together. If it fails, the change is a deliberate,
+// CHANGELOG-worthy wire change or a bug — there is no third option.
 import { createRequire } from "node:module";
 import { check, summary } from "./helpers/check.mjs";
-import { vscode, OUT, userText, assistantText, textMsg, userImageMsg, assistantToolCallMsg, toolResultMsg } from "./helpers/fakes.mjs";
+import { vscode, OUT, makeProvider, userText, assistantText, textMsg, userImageMsg, assistantToolCallMsg, toolResultMsg } from "./helpers/fakes.mjs";
 
 const require = createRequire(import.meta.url);
 const { convertMessages } = require(OUT("utils.js"));
-const { ReasoningCache, fingerprintAssistantTurn } = require(OUT("reasoning_cache.js"));
+const { fingerprintAssistantTurn } = require(OUT("reasoning_cache.js"));
 const { buildRequestBody } = require(OUT("request_body.js"));
 const { buildToolPayload } = require(OUT("tool_payload.js"));
-
-// Mirrors provider.attachReasoningToHistory (same algorithm, no logging).
-function attach(messages, cache) {
-	for (const m of messages) {
-		if (m.role !== "assistant" || m.reasoning_content) continue;
-		const fp = fingerprintAssistantTurn({
-			text: typeof m.content === "string" ? m.content : "",
-			toolCalls: (m.tool_calls ?? []).map((tc) => ({ id: tc.id, name: tc.function.name })),
-		});
-		if (!fp) continue;
-		m.reasoning_content = cache.get(fp) ?? "";
-	}
-}
 
 const sentinel = new vscode.LanguageModelDataPart(new TextEncoder().encode("ephemeral"), "cache_control");
 const HISTORY = [
@@ -38,15 +25,21 @@ const HISTORY = [
 ];
 const TOOLS = [{ name: "get_weather", description: "Get the weather", inputSchema: { type: "object", properties: { city: { type: "string" } }, required: ["city"] } }];
 
-// Seed the cache exactly as a previous turn would have: tc: for the tool-call turn, tx: for the text turn.
-const cache = new ReasoningCache(512);
-cache.set(fingerprintAssistantTurn({ text: "", toolCalls: [{ id: "call_00_abc", name: "get_weather" }] }), "I should call get_weather for Tokyo.");
-cache.set(fingerprintAssistantTurn({ text: "It is sunny and 22°C in Tokyo.", toolCalls: [] }), "The tool says sunny.");
+// A real provider whose reasoning cache is seeded exactly as previous turns
+// would have left it: tc: for the tool-call turn, tx: for the text turn.
+function seededProvider() {
+	const { provider } = makeProvider();
+	provider._reasoningCache.set(fingerprintAssistantTurn({ text: "", toolCalls: [{ id: "call_00_abc", name: "get_weather" }] }), "I should call get_weather for Tokyo.");
+	provider._reasoningCache.set(fingerprintAssistantTurn({ text: "It is sunny and 22°C in Tokyo.", toolCalls: [] }), "The tool says sunny.");
+	return provider;
+}
 
 // === Golden 1: thinking + tools (Pro thinking) ===
 {
 	const messages = convertMessages(HISTORY, { imageInput: false });
-	attach(messages, cache);
+	const provider = seededProvider();
+	provider.attachReasoningToHistory(messages, true);
+	provider.dispose();
 	const payload = buildToolPayload(TOOLS, false);
 	const body = buildRequestBody({ apiModel: "deepseek-v4-pro", messages, thinking: true, reasoningEffort: "max", maxOutputTokens: 393216, modelOptions: undefined, tools: payload.tools, tool_choice: payload.tool_choice });
 	const actual = JSON.stringify(body);
@@ -90,7 +83,9 @@ cache.set(fingerprintAssistantTurn({ text: "It is sunny and 22°C in Tokyo.", to
 {
 	const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 	const messages = convertMessages([...HISTORY.slice(0, 5), userImageMsg("What colour is this?", png)], { imageInput: true });
-	attach(messages, cache);
+	const provider = seededProvider();
+	provider.attachReasoningToHistory(messages, true);
+	provider.dispose();
 	const body = buildRequestBody({ apiModel: "deepseek-v4-flash-vision-exp", messages, thinking: true, reasoningEffort: "high", maxOutputTokens: 393216, modelOptions: undefined, tools: undefined, tool_choice: undefined });
 	const actual = JSON.stringify(body);
 	const EXPECTED =
