@@ -24,14 +24,59 @@ export interface BalanceInfo {
 export const BASE_URL = "https://api.deepseek.com/v1";
 export const BALANCE_URL = "https://api.deepseek.com/user/balance";
 
+/** Ceiling for an honored Retry-After. The server may ask for minutes; a
+ * chat request stalled that long inside Copilot's UI (which shows nothing
+ * until SSE flows) reads as a hang, so we cap what we're willing to wait. */
+export const MAX_RETRY_AFTER_MS = 10_000;
+
+/**
+ * Backoff for retry attempt `attemptIndex` (0-based): exponential 1s → 2s,
+ * raised to a 429/503 `Retry-After` header when the server sent one —
+ * delay-seconds form only (the HTTP-date form is rare and malformed values
+ * must never extend the wait), capped at MAX_RETRY_AFTER_MS.
+ */
+export function computeRetryDelay(attemptIndex: number, retryAfterHeader: string | null): number {
+	const backoffMs = 1000 * Math.pow(2, attemptIndex);
+	if (retryAfterHeader !== null && /^\d+$/.test(retryAfterHeader.trim())) {
+		const retryAfterMs = Number(retryAfterHeader.trim()) * 1000;
+		return Math.min(Math.max(backoffMs, retryAfterMs), MAX_RETRY_AFTER_MS);
+	}
+	return backoffMs;
+}
+
+/**
+ * setTimeout that loses the race to an abort signal: rejects with
+ * AbortError immediately when the signal fires (or already fired). The
+ * retry sleep must be abortable — a user's Cancel during a plain
+ * `setTimeout` backoff would otherwise be ignored until the sleep ran out.
+ */
+export function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) {
+			reject(new DOMException("Aborted", "AbortError"));
+			return;
+		}
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(new DOMException("Aborted", "AbortError"));
+		};
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
 /**
  * Fetch with retry on transient failures (network errors, 5xx, 429).
  * 4xx (except 429) are non-retryable client errors and bubble immediately.
- * Aborts (user cancel) bypass retry.
+ * Aborts (user cancel) bypass retry — including during a backoff sleep.
  *
- * Retries are bounded to attempts=3 with exponential backoff (1s, 2s) so
- * worst case adds ~3s before giving up — well within Copilot's request
- * timeout window.
+ * Retries are bounded to attempts=3 with exponential backoff (1s, 2s); a
+ * server-sent Retry-After can raise a sleep up to 10s (MAX_RETRY_AFTER_MS),
+ * so the worst case adds ~3s normally and ~20s when the server explicitly
+ * asks for it — still within Copilot's request timeout window.
  *
  * A per-attempt timeout (default 5 min) prevents hangs. DeepSeek's thinking
  * mode with max effort can take 2–5 minutes for complex reasoning chains,
@@ -52,6 +97,7 @@ export async function fetchWithRetry(
 		if (signal.aborted) {
 			throw new DOMException("Aborted", "AbortError");
 		}
+		let retryAfterHeader: string | null = null;
 		try {
 			// Combine user cancel signal with per-attempt timeout.
 			// AbortSignal.any() is available in Node 20+ / VS Code 1.104+.
@@ -65,7 +111,13 @@ export async function fetchWithRetry(
 			}
 			// Retryable: 5xx server errors, 429 rate limit
 			lastErr = new Error(`HTTP ${res.status} ${res.statusText}`);
-			logger("retry", { attempt: i + 1, status: res.status, willRetry: i < attempts - 1 });
+			retryAfterHeader = res.headers.get("retry-after");
+			logger("retry", {
+				attempt: i + 1,
+				status: res.status,
+				willRetry: i < attempts - 1,
+				...(retryAfterHeader !== null ? { retryAfter: retryAfterHeader } : {}),
+			});
 			// Drain body so the connection can be reused
 			try {
 				await res.text();
@@ -95,8 +147,11 @@ export async function fetchWithRetry(
 			}
 		}
 		if (i < attempts - 1) {
-			const delayMs = 1000 * Math.pow(2, i);
-			await new Promise((r) => setTimeout(r, delayMs));
+			const delayMs = computeRetryDelay(i, retryAfterHeader);
+			if (retryAfterHeader !== null) {
+				logger("retry.delay", { delayMs, retryAfter: retryAfterHeader });
+			}
+			await abortableDelay(delayMs, signal);
 		}
 	}
 	throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
