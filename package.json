@@ -151,8 +151,9 @@
 		"publish": "vsce publish",
 		"prepare-icon": "node scripts/prepare-icon.mjs",
 		"pretest": "npm run compile",
-		"test": "npm run test:unit",
-		"test:unit": "node test/unit_cache_breakdown.mjs && node test/unit_off_peak.mjs && node test/unit_tool_name_validation.mjs && node test/unit_tool_wire_name.mjs && node test/unit_tool_limit.mjs && node test/unit_context_usage.mjs && node test/unit_tool_choice.mjs && node test/unit_request_kind.mjs && node test/unit_reasoning_cache.mjs && node test/unit_image_content.mjs && node test/unit_request_body.mjs && node test/unit_sse.mjs && node test/unit_api_client.mjs"
+		"test": "npm run test:unit && npm run test:adapter",
+		"test:unit": "node test/run_tests.mjs unit",
+		"test:adapter": "node test/run_tests.mjs adapter"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",
