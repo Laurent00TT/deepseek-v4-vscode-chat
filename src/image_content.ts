@@ -43,6 +43,16 @@ export const IMAGE_TOKENS_PER_IMAGE = 384;
  */
 export const MAX_REQUEST_BODY_BYTES = 48 * 1024 * 1024;
 
+/**
+ * DeepSeek caps a single inline (base64 / URL) image at 32 MiB — separate
+ * from the 48 MiB body cap; Files API uploads get 64 MiB, which we don't use.
+ * Compared against the RAW attachment bytes (the lenient reading; if the
+ * server measures the encoded form a borderline image still gets the server
+ * error — no worse than before the check). Verified against
+ * https://api-docs.deepseek.com/guides/vision on 2026-08-22.
+ */
+export const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+
 /** Ordered content inputs harvested from one VS Code chat message. */
 export type UserContentInput = { kind: "text"; text: string } | { kind: "image"; mimeType: string; data: Uint8Array };
 

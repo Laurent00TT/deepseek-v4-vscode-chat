@@ -20,7 +20,7 @@ import {
 	ToolCallAssembler,
 	type CompletedToolCall,
 } from "./sse";
-import { IMAGE_TOKENS_PER_IMAGE, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
+import { IMAGE_TOKENS_PER_IMAGE, MAX_IMAGE_BYTES, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
 import { buildRequestBody, coerceReasoningEffort } from "./request_body";
 import { MODEL_VARIANTS, findVariant } from "./model_catalog";
 import { BASE_URL, BALANCE_URL, fetchWithRetry, formatApiError, type BalanceInfo } from "./api_client";
@@ -931,15 +931,18 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	/**
-	 * Count image attachments across USER turns — the only place the wire
-	 * conversion emits image blocks. Uses the same structural detection as
-	 * convertMessages (mimeType `image/*` + Uint8Array data) so the estimate
-	 * counts exactly the parts that will be sent. Char-based estimation
-	 * doesn't work for images, so they are budgeted separately at the fixed
-	 * IMAGE_TOKENS_PER_IMAGE ceiling.
+	 * Image attachments across USER turns — the only place the wire
+	 * conversion emits image blocks: how many, and the largest one's byte
+	 * size. Uses the same structural detection as convertMessages (mimeType
+	 * `image/*` + Uint8Array data) so the figures cover exactly the parts
+	 * that will be sent. Char-based estimation doesn't work for images, so
+	 * they are budgeted separately at the fixed IMAGE_TOKENS_PER_IMAGE
+	 * ceiling; the largest-byte figure feeds the per-image transport
+	 * pre-check (MAX_IMAGE_BYTES).
 	 */
-	private countImageParts(msgs: readonly vscode.LanguageModelChatMessage[]): number {
+	private imageStats(msgs: readonly vscode.LanguageModelChatMessage[]): { count: number; maxBytes: number } {
 		let count = 0;
+		let maxBytes = 0;
 		for (const m of msgs) {
 			if (m.role !== vscode.LanguageModelChatMessageRole.User) {
 				continue;
@@ -948,10 +951,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				const obj = part as { mimeType?: unknown; data?: unknown };
 				if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("image/") && obj.data instanceof Uint8Array) {
 					count++;
+					maxBytes = Math.max(maxBytes, obj.data.byteLength);
 				}
 			}
 		}
-		return count;
+		return { count, maxBytes };
 	}
 
 	/** Concatenated text of a single chat message (text parts only). */
@@ -1235,7 +1239,22 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// Images bypass the char-based estimator: each is billed at up to
 			// 384 tokens regardless of byte size. Counted only for vision
 			// variants — everywhere else convertMessages drops them.
-			const imageTokenCount = variant.vision === true ? this.countImageParts(messages) * IMAGE_TOKENS_PER_IMAGE : 0;
+			const images = variant.vision === true ? this.imageStats(messages) : { count: 0, maxBytes: 0 };
+			// Per-image transport cap (separate from the 48 MiB body cap below):
+			// DeepSeek rejects a single inline image over 32 MiB. Fail here with
+			// an actionable message rather than after the whole body is built.
+			// A history image can only be over the cap if it was attached while
+			// a non-Vision variant was selected (dropped then, sent now) — hence
+			// the "start a new chat" escape hatch.
+			if (images.maxBytes > MAX_IMAGE_BYTES) {
+				const sizeMiB = (images.maxBytes / (1024 * 1024)).toFixed(1);
+				this.log("request.image_too_large", { bytes: images.maxBytes, limit: MAX_IMAGE_BYTES });
+				void vscode.window.showErrorMessage(
+					`DeepSeek image too large. One attachment is ${sizeMiB} MiB — over DeepSeek's 32 MiB per-image limit. Attach a smaller image, or start a new chat.`
+				);
+				throw new Error(`Image attachment exceeds DeepSeek's 32 MiB per-image limit (${sizeMiB} MiB).`);
+			}
+			const imageTokenCount = images.count * IMAGE_TOKENS_PER_IMAGE;
 			const inputTokenCount = Math.ceil(messageChars / this._charsPerToken) + imageTokenCount;
 			const toolTokenCount = Math.ceil(toolChars / this._charsPerToken);
 			const tokenLimit = Math.max(1, model.maxInputTokens);

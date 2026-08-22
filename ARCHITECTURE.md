@@ -384,7 +384,9 @@ Invariants, in decreasing order of importance:
 - Transport cap: DeepSeek rejects request bodies over **48 MiB**
   (`MAX_REQUEST_BODY_BYTES`; base64 counts). The serialized body is
   checked once before fetch and an actionable error ("attach fewer/smaller
-  images") replaces the opaque server 4xx.
+  images") replaces the opaque server 4xx. A single inline image is capped
+  at **32 MiB** (`MAX_IMAGE_BYTES`, raw bytes): the largest user-turn
+  attachment is checked before the body is built, same treatment.
 
 ### Errors and retry
 

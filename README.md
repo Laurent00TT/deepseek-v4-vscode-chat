@@ -59,9 +59,9 @@ Vision notes:
   from the bytes; unsupported attachments are dropped with a log warning
   rather than failing the whole request).
 - Each image is billed at up to 384 tokens, at the same price as Flash.
-- The API caps request bodies at 48 MiB (base64 counts toward it); the
-  extension pre-checks this and tells you to attach fewer/smaller images
-  instead of surfacing an opaque server error.
+- The API caps request bodies at 48 MiB (base64 counts toward it) and a
+  single image at 32 MiB; the extension pre-checks both and tells you to
+  attach fewer/smaller images instead of surfacing an opaque server error.
 - Extended thinking, agent-mode tool calling, and the reasoning-cache
   round-trip all work on the Vision variants exactly as on Flash.
 - The model is experimental (`-exp`) on DeepSeek's side; expect the
@@ -154,7 +154,8 @@ only shipped in VS Code 1.120
 Images are only sent on the **Flash Vision** variants — on text-only
 variants they are dropped with a log warning (never proxied through another
 model). Also check the format (JPEG/PNG/GIF/WebP) and total request size
-(DeepSeek caps request bodies at 48 MiB; base64 counts toward it).
+(DeepSeek caps request bodies at 48 MiB — base64 counts toward it — and
+single images at 32 MiB).
 
 **Why is there no OpenRouter / custom base-URL support?**
 Deliberate — see the discussion in

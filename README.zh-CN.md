@@ -49,7 +49,7 @@ DeepSeek 于 2026-08-21 发布了首个多模态模型
 
 - 支持格式：JPEG、PNG、GIF、WebP（不支持的附件会被丢弃并记录警告，不会让整个请求失败）
 - 每张图片最多按 384 tokens 计费，价格与 Flash 相同
-- API 请求体上限 48 MiB（base64 计入）；扩展会本地预检并提示"减少或缩小图片"，而不是抛出一个看不懂的服务端错误
+- API 请求体上限 48 MiB（base64 计入）、单张图片上限 32 MiB；扩展会本地预检两者并提示"减少或缩小图片"，而不是抛出一个看不懂的服务端错误
 - 扩展思考、Agent 工具调用、推理缓存往返在 Vision 变体上与 Flash 完全一致
 - 模型带 `-exp` 后缀，DeepSeek 侧仍属实验性，偶有毛边属正常
 
@@ -110,7 +110,7 @@ DeepSeek thinking 模式要求把先前 assistant 轮的推理链传回。本扩
 把 VS Code 升级到 **1.120 或更新**。扩展一直在上报用量，但宿主侧为扩展提供的模型显示用量的代码 VS Code 1.120 才发布（[#18](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/18)、[microsoft/vscode#315394](https://github.com/microsoft/vscode/issues/315394)）。
 
 **我附加的图片好像被忽略了。**
-只有 **Flash Vision** 变体会发送图片 —— 纯文本变体会丢弃图片并在日志中警告（绝不代理转述）。另外检查格式（JPEG/PNG/GIF/WebP）和请求总大小（DeepSeek 请求体上限 48 MiB，base64 计入）。
+只有 **Flash Vision** 变体会发送图片 —— 纯文本变体会丢弃图片并在日志中警告（绝不代理转述）。另外检查格式（JPEG/PNG/GIF/WebP）和请求总大小（DeepSeek 请求体上限 48 MiB，base64 计入；单张图片上限 32 MiB）。
 
 **为什么不支持 OpenRouter / 自定义 base URL？**
 有意为之 —— 详见 [#4](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/4) 的讨论。OpenRouter 会把 DeepSeek 的 thinking 协议归一化成另一套形状（`reasoning_details` 而非 `reasoning_content`、不同的 thinking 开启参数、没有缓存命中计数），恰好破坏本扩展存在的意义。OpenRouter 上的 DeepSeek 接入应由独立的 provider 承担（例如 #4 提问者自建的 [ostash/openrouter-chat-provider](https://github.com/ostash/openrouter-chat-provider)）。

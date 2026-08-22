@@ -18,6 +18,7 @@
 import process from "node:process";
 import {
 	IMAGE_TOKENS_PER_IMAGE,
+	MAX_IMAGE_BYTES,
 	MAX_REQUEST_BODY_BYTES,
 	SUPPORTED_IMAGE_MIME_TYPES,
 	normalizeImageMime,
@@ -52,6 +53,8 @@ const txt = (text) => ({ kind: "text", text });
 // === 1. Constants pinned to the DeepSeek Vision API contract ===
 check("IMAGE_TOKENS_PER_IMAGE is 384", IMAGE_TOKENS_PER_IMAGE, 384);
 check("MAX_REQUEST_BODY_BYTES is 48 MiB", MAX_REQUEST_BODY_BYTES, 48 * 1024 * 1024);
+check("MAX_IMAGE_BYTES is 32 MiB", MAX_IMAGE_BYTES, 32 * 1024 * 1024);
+check("per-image cap is below the body cap", MAX_IMAGE_BYTES < MAX_REQUEST_BODY_BYTES, true);
 check("exactly 4 supported formats", SUPPORTED_IMAGE_MIME_TYPES.size, 4);
 
 // === 2. MIME normalization ===
