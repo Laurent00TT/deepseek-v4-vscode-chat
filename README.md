@@ -14,7 +14,7 @@ Native DeepSeek V4 (Pro / Flash / Flash Vision) provider for VS Code Copilot Cha
 - Extended thinking with configurable effort (`high` / `max`, see [Settings](#settings)) and full reasoning chain preserved across multi-turn agent loops
 - Agent-mode tool calling that does not break on the second turn
 - Status bar with live account balance and session spend (auto-detects CNY / USD)
-- Peak/off-peak billing hint in the status-bar hover — tells you which side of DeepSeek's V4 time-of-day pricing window the clock is on, and when it next flips (local time)
+- Peak/off-peak pricing panel in the status-bar hover — lists both of DeepSeek's V4 time-of-day pricing windows in local time and marks the one the clock is in right now
 - Per-conversation context-window usage fed into Copilot Chat's **native** context indicator — it follows the focused chat (small auxiliary requests like chat-title generation are filtered out so they don't skew it)
 - Background balance refresh after each chat (debounced, silent)
 - Persistent reasoning cache (survives VS Code restarts)

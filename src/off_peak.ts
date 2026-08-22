@@ -37,6 +37,43 @@ export function isPeakTime(date: Date): boolean {
 }
 
 /**
+ * Off-peak windows: the complement of PEAK_WINDOWS_UTC on the 24h ring,
+ * as [startMinute, endMinute) since UTC midnight. Each gap runs from one
+ * peak window's end to the next window's start; the last gap wraps past
+ * midnight, so its end minute exceeds MINUTES_PER_DAY (e.g. 10:00 UTC →
+ * 01:00 UTC next day is [600, 1500)). Consumers render ends mod 1440.
+ */
+export function offPeakWindowsUtc(): ReadonlyArray<readonly [number, number]> {
+	return PEAK_WINDOWS_UTC.map(([, end], i) => {
+		const next =
+			i + 1 < PEAK_WINDOWS_UTC.length ? PEAK_WINDOWS_UTC[i + 1][0] : PEAK_WINDOWS_UTC[0][0] + MINUTES_PER_DAY;
+		return [end, next] as const;
+	});
+}
+
+/**
+ * Render a UTC minute-window list as local wall-clock ranges, sorted by
+ * local start time and joined with a middle dot — e.g. with UTC+8
+ * (offsetMinutes 480) the peak windows format as "09:00–12:00 · 14:00–18:00".
+ *
+ * `offsetMinutes` is minutes AHEAD of UTC — the NEGATION of
+ * `Date#getTimezoneOffset()` (which is UTC−local). A range whose end
+ * lands on/before its start after the shift crosses local midnight and
+ * is rendered as-is ("18:00–09:00"): the wrap is legible and splitting
+ * it into two rows would double the visual noise for half the world's
+ * timezones.
+ */
+export function formatWindowsLocal(windows: ReadonlyArray<readonly [number, number]>, offsetMinutes: number): string {
+	const mod = (m: number) => ((m % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+	const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+	return windows
+		.map(([start, end]) => ({ s: mod(start + offsetMinutes), e: mod(end + offsetMinutes) }))
+		.sort((a, b) => a.s - b.s)
+		.map(({ s, e }) => `${hhmm(s)}–${hhmm(e)}`)
+		.join(" · ");
+}
+
+/**
  * The next UTC instant at which the peak/off-peak state flips — i.e. the
  * next window edge strictly after `date`. Always within the next 24h.
  * Sub-minute precision is intentional: called at second N of a minute it

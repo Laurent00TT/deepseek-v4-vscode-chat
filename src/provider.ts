@@ -28,7 +28,7 @@ import { toWireName, buildWireNameMap } from "./tool_names";
 import { assertAdvertisedToolLimit } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
-import { isPeakTime, nextBoundary } from "./off_peak";
+import { isPeakTime, nextBoundary, offPeakWindowsUtc, formatWindowsLocal, PEAK_WINDOWS_UTC } from "./off_peak";
 import { ContextUsageService } from "./context_usage_service";
 import { classifyRequestKind, isReportableContextRequest, type RequestKind } from "./request_kind";
 
@@ -547,6 +547,25 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		};
 		md.supportThemeIcons = true;
 
+		// Issue #22: pricing-window panel, pinned above the header as its own
+		// visually separate section. Both windows are listed in LOCAL wall-clock
+		// time and the row the system clock currently falls in carries the
+		// filled radio dot (bold label); the other row stays outlined — a
+		// read-only radio group driven by the clock. No prices or multipliers
+		// (those drift; see the session-cost rationale above the BalanceInfo
+		// interface). The dot can go stale while the hover popup is open across
+		// a window edge; the boundary timer (schedulePeakBoundaryRefresh)
+		// rebuilds the tooltip for the next hover, matching the accepted
+		// staleness model documented on flashRefreshAck.
+		const now = new Date();
+		const peakNow = isPeakTime(now);
+		const tzOffset = -now.getTimezoneOffset();
+		const row = (active: boolean, label: string, windows: string) =>
+			`${active ? "$(circle-filled)" : "$(circle-outline)"} ${active ? `**${label}**` : label} &nbsp;&nbsp; ${windows}\n\n`;
+		md.appendMarkdown(row(peakNow, "Peak/高峰", formatWindowsLocal(PEAK_WINDOWS_UTC, tzOffset)));
+		md.appendMarkdown(row(!peakNow, "Off-peak/非高峰", formatWindowsLocal(offPeakWindowsUtc(), tzOffset)));
+		md.appendMarkdown("---\n\n");
+
 		md.appendMarkdown("### DeepSeek V4\n\n");
 
 		// Balance row: refresh action sits inline next to the **Balance** label.
@@ -575,22 +594,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				);
 			}
 		}
-
-		// Issue #22: peak/off-peak billing hint, read off the system clock.
-		// Shows only the STATE and the local time of the next flip — never
-		// prices or multipliers (those drift; see the session-cost rationale
-		// above the BalanceInfo interface). The row can go stale while the
-		// hover popup is open across a window edge; the boundary timer
-		// (schedulePeakBoundaryRefresh) rebuilds the tooltip for the next
-		// hover, matching the accepted staleness model documented on
-		// flashRefreshAck.
-		const now = new Date();
-		const flipAt = formatTime24(nextBoundary(now).getTime()).slice(0, 5);
-		md.appendMarkdown(
-			isPeakTime(now)
-				? `$(flame) **Peak pricing** &nbsp;·&nbsp; off-peak starts ${flipAt}\n\n`
-				: `$(check) Off-peak pricing &nbsp;·&nbsp; until ${flipAt}\n\n`
-		);
 
 		md.appendMarkdown("---\n\n");
 
