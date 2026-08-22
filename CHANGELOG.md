@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Repo-wide prettier adoption, pinned and CI-enforced.** One-time `prettier --write` pass over the TS sources (semantically neutral — verified by compile, eslint, all unit suites including the `out/provider.js` text pin, and a vsce dry package; compiled string literals unchanged). Prettier is now pinned exactly (`3.8.3`) because formatting drifts across prettier minors, and CI gained a `prettier --check` step so style can no longer drift. The reformat commit is listed in `.git-blame-ignore-revs`, which GitHub's blame view honors natively.
 
+- **`.gitattributes` pins LF in the working tree (`* text=auto eol=lf`).** On Windows with the default `core.autocrlf=true`, every text file checked out as CRLF and `npx prettier --check .` (endOfLine `lf`) flagged all sources even though CI was green — the CONTRIBUTING verification matrix could not pass on a stock Windows clone. The index was already LF everywhere, so this is checkout-only; existing clones re-checkout once with `git rm --cached -r . && git reset --hard`.
+
 ## [0.3.10] - 2026-08-12
 
 ### Fixed
