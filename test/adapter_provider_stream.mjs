@@ -12,24 +12,9 @@ const { fingerprintAssistantTurn } = require(OUT("reasoning_cache.js"));
 const USAGE = { prompt_tokens: 1000, prompt_cache_hit_tokens: 800, prompt_cache_miss_tokens: 200, completion_tokens: 50, completion_tokens_details: { reasoning_tokens: 30 } };
 
 async function main() {
-	// out/provider.js does `const vscode = __importStar(require("vscode"))`
-	// (TS esModuleInterop). __importStar snapshots Object.getOwnPropertyNames
-	// of the shim's exports ONCE, the first time `out/provider.js` is required
-	// in this process, and only defines a forwarding getter for keys that
-	// exist at that instant — a key absent at that moment can never appear
-	// later (verified empirically: installing after the first require is
-	// never visible through provider.js's own `vscode` binding, even though
-	// fakes.mjs's own `vscode` reference — a plain object, no __importStar
-	// involved — sees it immediately). So `LanguageModelThinkingPart` must
-	// already be an own property of the shim's exports the first time
-	// provider.js loads, or no `shim.installThinkingPart()` call later in
-	// this file would ever take effect. Prime that binding once, up front,
-	// without constructing a real provider (avoids side effects), then
-	// remove it immediately so the first scenario below (which needs the
-	// "no ThinkingPart" 💭-fallback path) starts in the right state.
-	shim.installThinkingPart();
-	require(OUT("provider.js"));
-	shim.removeThinkingPart();
+	// No priming needed: the shim pre-declares LanguageModelThinkingPart as an
+	// own export (undefined), so __importStar gives provider.js a live getter
+	// and install/removeThinkingPart below take effect whenever they are called.
 
 	// --- text + reasoning, no ThinkingPart on the host ---
 	{

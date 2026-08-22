@@ -145,7 +145,14 @@ const __shim = {
 		this.registeredCommands.clear();
 		this.outputChannels.length = 0;
 		this.statusBarItems.length = 0;
+		this.removeThinkingPart();
 	},
+	// `LanguageModelThinkingPart` is pre-declared as an own property of
+	// module.exports (value `undefined`) so TS's `__importStar` — which
+	// snapshots Object.getOwnPropertyNames once, at the first
+	// `require("vscode")` — installs a LIVE forwarding getter for it. These
+	// two therefore only ever ASSIGN; `delete` would drop the own property
+	// and, after the snapshot, the getter could never see it come back.
 	installThinkingPart() {
 		module.exports.LanguageModelThinkingPart = class LanguageModelThinkingPart {
 			constructor(value, id, metadata) {
@@ -156,7 +163,7 @@ const __shim = {
 		};
 	},
 	removeThinkingPart() {
-		delete module.exports.LanguageModelThinkingPart;
+		module.exports.LanguageModelThinkingPart = undefined;
 	},
 };
 
@@ -242,6 +249,9 @@ const window = {
 	},
 };
 const commands = {
+	// Divergence: an UNREGISTERED id resolves to undefined here, whereas real
+	// VS Code rejects with `command '<id>' not found`. Suites that need the
+	// rejection must register a throwing handler.
 	executeCommand: async (id, ...args) => {
 		__shim.calls.executeCommand.push({ id, args });
 		const handler = __shim.registeredCommands.get(id);
@@ -283,6 +293,10 @@ module.exports = {
 	LanguageModelToolCallPart,
 	LanguageModelToolResultPart,
 	LanguageModelDataPart,
+	// Declared up front (value `undefined` = "host without ThinkingPart", the
+	// default) purely so __importStar sees the key. __shim.installThinkingPart()
+	// / removeThinkingPart() flip it; __shim.reset() restores the default.
+	LanguageModelThinkingPart: undefined,
 	MarkdownString,
 	ThemeIcon,
 	ThemeColor,
