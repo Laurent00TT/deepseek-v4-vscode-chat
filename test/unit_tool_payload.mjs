@@ -30,7 +30,7 @@ check("non-string description → empty", one({ name: "a", description: 42 }).de
 check("auto when not required", buildToolPayload([{ name: "a" }], false).tool_choice, "auto");
 checkDeep("single tool + required → named force", buildToolPayload([{ name: "a" }], true).tool_choice, { type: "function", function: { name: "a" } });
 check("multiple tools + required → 'required'", buildToolPayload([{ name: "a" }, { name: "b" }], true).tool_choice, "required");
-checkDeep("named force uses the WIRE name of an aliased tool", buildToolPayload([{ name: "weather.get" }], true).tool_choice.function.name.startsWith("weather_get_"), true);
+check("named force uses the WIRE name of an aliased tool", buildToolPayload([{ name: "weather.get" }], true).tool_choice.function.name.startsWith("weather_get_"), true);
 
 // --- schema sanitization ---
 checkDeep("null schema → empty object schema", one({ name: "a", inputSchema: null }).parameters, { type: "object", properties: {} });

@@ -2,7 +2,7 @@
 // headers/body, pre-flight guards (token overflow, 32 MiB image, 48 MiB body),
 // API error → notification mapping, and the usage pipeline (estimator EMA,
 // usage DataPart gating, cache-breakdown warning, context nudge hysteresis).
-import { check, checkMatch, summary } from "./helpers/check.mjs";
+import { check, checkMatch, summary, withConsole } from "./helpers/check.mjs";
 import {
 	vscode,
 	shim,
@@ -14,6 +14,7 @@ import {
 	assistantText,
 	userImageMsg,
 	jsonResponse,
+	onFetch,
 	contentChunk,
 	finishChunk,
 	usageChunk,
@@ -30,17 +31,9 @@ const ok = (usage) => [contentChunk("ok"), finishChunk("stop"), usageChunk(usage
 // failed", ...) before rethrowing — not just the token-overflow / 48 MiB
 // cases the task brief calls out (those additionally get their own explicit
 // console.error at the guard site). Every scenario below that expects
-// t.error to be set therefore prints to console.error; silence it around
+// t.error to be set therefore prints to console.error; capture it around
 // each such call so the suite's own ✓/✗ output stays pristine.
-async function silenceConsoleError(fn) {
-	const orig = console.error;
-	console.error = () => {};
-	try {
-		return await fn();
-	} finally {
-		console.error = orig;
-	}
-}
+const quiet = async (fn) => (await withConsole("error", fn)).result;
 
 async function main() {
 	// --- headers and body ---
@@ -62,7 +55,7 @@ async function main() {
 	{
 		shim.reset();
 		const { provider } = makeProvider({ secrets: fakeSecrets({}) });
-		const t = await silenceConsoleError(() => runTurn(provider, {}));
+		const t = await quiet(() => runTurn(provider, {}));
 		checkMatch("no key → throws", t.error?.message, /API key not found/);
 		provider.dispose();
 	}
@@ -71,7 +64,7 @@ async function main() {
 		shim.reset();
 		const { provider } = makeProvider();
 		const huge = "x".repeat(2_000_000); // 2M chars / 3.0 chars-per-token ≈ 667K > 655,360
-		const t = await silenceConsoleError(() => runTurn(provider, { messages: [userText(huge)] }));
+		const t = await quiet(() => runTurn(provider, { messages: [userText(huge)] }));
 		checkMatch("overflow throws before fetch", t.error?.message, /exceeds token limit/);
 		check("no request was sent", t.captured.url, undefined);
 		checkMatch("context-overflow guidance shown", shim.calls.showErrorMessage.at(-1)?.message, /context window exceeded/);
@@ -83,7 +76,7 @@ async function main() {
 		shim.reset();
 		const { provider } = makeProvider();
 		const big = new Uint8Array(32 * 1024 * 1024 + 1);
-		const t = await silenceConsoleError(() =>
+		const t = await quiet(() =>
 			runTurn(provider, { model: model("deepseek-v4-flash-vision-exp"), messages: [userImageMsg("look", big)] })
 		);
 		checkMatch("oversized image throws", t.error?.message, /32 MiB per-image limit/);
@@ -95,8 +88,11 @@ async function main() {
 	{
 		shim.reset();
 		const { provider } = makeProvider();
+		// SLOWEST STEP IN THE SUITE: allocating and base64-encoding 48 MiB of
+		// image bytes takes a couple of seconds. It is the only way to cross the
+		// real 48 MiB body guard, so it stays — just don't be surprised by the pause.
 		const img = new Uint8Array(16 * 1024 * 1024);
-		const t = await silenceConsoleError(() =>
+		const t = await quiet(() =>
 			runTurn(provider, {
 				model: model("deepseek-v4-flash-vision-exp"),
 				messages: [userImageMsg("a", img), userImageMsg("b", img), userImageMsg("c", img)],
@@ -156,7 +152,7 @@ async function main() {
 		shim.reset();
 		if (c.answer) shim.answers.showErrorMessage = c.answer;
 		const { provider } = makeProvider();
-		const t = await silenceConsoleError(() => runTurn(provider, { response: jsonResponse(c.status, c.body) }));
+		const t = await quiet(() => runTurn(provider, { response: jsonResponse(c.status, c.body) }));
 		await tick();
 		checkMatch(`${c.status}: throws formatted API error`, t.error?.message, new RegExp(`DeepSeek API error: ${c.status}`));
 		const last = shim.calls.showErrorMessage.at(-1);
@@ -164,6 +160,46 @@ async function main() {
 		check(`${c.status}: buttons`, last?.items.join(","), c.items);
 		if (c.cmd) check(`${c.status}: button runs ${c.cmd}`, shim.calls.executeCommand.some((x) => x.id === c.cmd), true);
 		if (c.external) check(`${c.status}: opens billing`, shim.calls.openExternal.includes(c.external), true);
+		provider.dispose();
+	}
+	// --- 429 is RETRIED, not mapped: three attempts, ~3s of backoff, then throw ---
+	{
+		// SLOW (~3s): fetchWithRetry does attempts=3 with 1s + 2s exponential
+		// backoff before giving up. Nothing here can be shortened without
+		// reaching into src/, so the suite pays the 3 seconds.
+		shim.reset();
+		const { provider, output } = makeProvider();
+		// A Response body can only be read once and fetchWithRetry drains each
+		// attempt, so hand runTurn a FACTORY: one fresh 429 per attempt.
+		const t = await quiet(() => runTurn(provider, { response: () => jsonResponse(429, { error: { message: "rate" } }) }));
+		check("429 was retried, not surfaced on the first attempt", t.captured.attempts, 3);
+		checkMatch("…each attempt logged with the status", output.text(), /"status":429/);
+		checkMatch("…the last attempt records willRetry:false", output.text(), /"attempt":3,"status":429,"willRetry":false/);
+		// DIVERGENCE, pinned deliberately: notifyApiError's 429 branch is
+		// UNREACHABLE from the chat path. fetchWithRetry treats 429 as retryable
+		// and, once attempts are exhausted, throws its own `HTTP <status>
+		// <statusText>` error (api_client.ts) instead of returning the response,
+		// so provider.ts never reaches `if (!response.ok)` → formatApiError →
+		// notifyApiError. Hence a bare "HTTP 429" and NO toast on this path.
+		checkMatch("exhausted retries throw the transport error, not a formatted API error", t.error?.message, /^HTTP 429/);
+		check("…so no 'DeepSeek API error: 429' is produced here", /DeepSeek API error: 429/.test(String(t.error?.message)), false);
+		check("…and the chat path shows the user no toast at all", shim.calls.showWarningMessage.length + shim.calls.showErrorMessage.length, 0);
+		provider.dispose();
+	}
+	// --- the 429 → "rate limited" toast, on the path that can actually reach it ---
+	{
+		// refreshBalance uses a plain fetch (no retry wrapper), so a 429 there
+		// does reach notifyApiError. This is the only live caller of that branch.
+		shim.reset();
+		const { provider } = makeProvider();
+		onFetch(
+			(u) => u.includes("/user/balance"),
+			() => jsonResponse(429, { error: { message: "rate" } }),
+		);
+		await provider.refreshBalance(false);
+		checkMatch("rate-limit warning names the status", shim.calls.showWarningMessage.at(-1)?.message, /rate limited \(429\)/);
+		check("…and offers NO buttons", shim.calls.showWarningMessage.at(-1)?.items.length, 0);
+		check("…it is a warning, not an error toast", shim.calls.showErrorMessage.length, 0);
 		provider.dispose();
 	}
 	// --- usage pipeline: estimator EMA, usage DataPart gating ---

@@ -248,7 +248,9 @@ export function model(id) {
 
 /**
  * Run one provideLanguageModelChatResponse turn against a stubbed
- * /chat/completions. `opts.response` is a Response (default: SSE from
+ * /chat/completions. `opts.response` is a Response, or a FUNCTION returning
+ * one — a Response body can only be read once, so retry scenarios (429/5xx)
+ * must pass a factory to get a fresh Response per attempt (default: SSE from
  * `opts.chunks`); `opts.progress` supplies a custom collector (default:
  * `progressCollector()`) for scenarios that need to act on parts as they
  * are reported. The turn's route is removed when it finishes.
@@ -262,7 +264,9 @@ export async function runTurn(provider, opts) {
 			captured.url = u;
 			captured.headers = init.headers;
 			captured.body = init.body;
-			return opts.response ?? sseResponse(opts.chunks ?? [DONE]);
+			captured.attempts = (captured.attempts ?? 0) + 1;
+			const preset = typeof opts.response === "function" ? opts.response() : opts.response;
+			return preset ?? sseResponse(opts.chunks ?? [DONE]);
 		},
 	);
 	const progress = opts.progress ?? progressCollector();
