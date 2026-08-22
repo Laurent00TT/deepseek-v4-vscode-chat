@@ -24,6 +24,7 @@ eslint.config.mjs
 .gitignore
 docs/**
 .claude/**
+.git-blame-ignore-revs
 
 # Build artifacts kept out of the package
 **/*.map
