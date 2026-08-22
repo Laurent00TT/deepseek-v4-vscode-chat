@@ -56,9 +56,16 @@ async function main() {
 		resetFetch();
 		const ctx = makeContext();
 		activate(ctx);
-		const opened = await until(() => shim.calls.executeCommand.some((c) => c.id === "workbench.action.openWalkthrough"));
+		// The flag is written one `await` AFTER the walkthrough command, so the
+		// poll covers both observables — otherwise the flag assertion below
+		// would ride on timer slack rather than on evidence.
+		const settled = await until(
+			() =>
+				shim.calls.executeCommand.some((c) => c.id === "workbench.action.openWalkthrough") &&
+				ctx.globalState.get("deepseekv4.welcomeShown") === true,
+		);
 		const open = shim.calls.executeCommand.find((c) => c.id === "workbench.action.openWalkthrough");
-		check("walkthrough opened", opened, true);
+		check("walkthrough opened and flag written", settled, true);
 		check("…with publisher.name#id", open?.args[0], "Laurent00TT.deepseek-v4-vscode-chat#deepseekv4GettingStarted");
 		check("welcomeShown persisted", ctx.globalState.get("deepseekv4.welcomeShown"), true);
 		disposeAll(ctx);

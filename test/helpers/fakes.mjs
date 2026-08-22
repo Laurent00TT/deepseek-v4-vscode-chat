@@ -155,8 +155,9 @@ export function onFetch(matcher, handler) {
 	routes.unshift(route);
 	return () => offFetch(route);
 }
-/** Remove one route previously added by `onFetch`. */
-export function offFetch(route) {
+/** Remove one route previously added by `onFetch` (module-local: callers get
+ * the disposer `onFetch` returns, never the route object itself). */
+function offFetch(route) {
 	const i = routes.indexOf(route);
 	if (i >= 0) {
 		routes.splice(i, 1);
@@ -288,4 +289,3 @@ export async function runTurn(provider, opts) {
 	return { captured, progress, error };
 }
 export const tick = () => new Promise((r) => setTimeout(r, 0));
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
