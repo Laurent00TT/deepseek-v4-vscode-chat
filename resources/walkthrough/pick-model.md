@@ -1,7 +1,7 @@
 # Pick a DeepSeek V4 model
 
 After setting your API key, open Copilot Chat and use the model picker at
-the bottom of the chat input. You will see four DeepSeek V4 variants:
+the bottom of the chat input. You will see six DeepSeek V4 variants:
 
 | Variant | Best for |
 |---|---|
@@ -9,6 +9,8 @@ the bottom of the chat input. You will see four DeepSeek V4 variants:
 | **DeepSeek V4 Pro** | Strong coding without the thinking-mode latency |
 | **DeepSeek V4 Flash (thinking)** | Cheapest path to extended thinking |
 | **DeepSeek V4 Flash** | Fast everyday edits, lowest cost |
+| **DeepSeek V4 Flash Vision (thinking)** | Screenshots and images with extended thinking (experimental model) |
+| **DeepSeek V4 Flash Vision** | Screenshots and images, fast and cheap (experimental model) |
 
 If you don't see them in the picker, open VS Code's Language Models manager
 and make sure DeepSeek V4 is enabled.

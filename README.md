@@ -1,27 +1,19 @@
 # DeepSeek V4 for Copilot Chat
 
-Native DeepSeek V4 (Pro / Flash / Flash Vision) provider for VS Code Copilot Chat — with full extended-thinking support, agent-mode tool calling, native multimodal image input, and built-in cost tracking.
+Use DeepSeek V4 (Pro / Flash / Flash Vision) as a native model in VS Code Copilot Chat — extended thinking, agent-mode tool calling, image input, and your real DeepSeek bill in the status bar.
 
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.106%2B-blue)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 [中文文档](./README.zh-CN.md) · [Changelog](./CHANGELOG.md) · [Architecture (contributor docs)](./ARCHITECTURE.md)
 
-## Features
+## Quick start
 
-- Six model variants in the Copilot model picker: **Pro (thinking)**, **Pro**, **Flash (thinking)**, **Flash**, **Flash Vision (thinking)**, **Flash Vision**
-- Native image input on the Vision variants (`deepseek-v4-flash-vision-exp`) — attach screenshots/images in Copilot Chat and DeepSeek sees the actual pixels, no proxy model in between
-- Extended thinking with configurable effort (`high` / `max`, see [Settings](#settings)) and full reasoning chain preserved across multi-turn agent loops
-- Agent-mode tool calling that does not break on the second turn
-- Status bar with live account balance and session spend (auto-detects CNY / USD)
-- Peak/off-peak pricing panel in the status-bar hover — lists both of DeepSeek's V4 time-of-day pricing windows in local time and marks the one the clock is in right now
-- Per-conversation context-window usage fed into Copilot Chat's **native** context indicator — it follows the focused chat (small auxiliary requests like chat-title generation are filtered out so they don't skew it)
-- Background balance refresh after each chat (debounced, silent)
-- Persistent reasoning cache (survives VS Code restarts)
-- Actionable error notifications for 400 (reasoning) / 401 / 402 / 422 / 429, plus mid-stream `insufficient_system_resource` truncation handling
-- Retry on transient failures (5xx, 429, network jitter), honoring `Retry-After` when the server sends one
-- Adaptive token estimator (EMA-calibrated chars/token from real `usage` data)
-- First-run walkthrough and a "key required" warning state in the picker so the model entries are always discoverable
+You need VS Code 1.106+, the **GitHub Copilot Chat** extension signed in (this extension only adds models to its picker), and a DeepSeek account with API balance.
+
+1. Install **DeepSeek V4 for Copilot Chat** from the VS Code Marketplace.
+2. Command Palette → `Manage DeepSeek V4 Provider` → paste your [DeepSeek API key](https://platform.deepseek.com/api_keys).
+3. In Copilot Chat, open the model picker and choose a DeepSeek V4 variant. If none are listed, use the picker's **Manage Models…** entry and enable DeepSeek V4.
 
 ## Models
 
@@ -34,54 +26,33 @@ Native DeepSeek V4 (Pro / Flash / Flash Vision) provider for VS Code Copilot Cha
 | DeepSeek V4 Flash Vision (thinking) | `deepseek-v4-flash-vision-exp` | ✓ | ✓ | 640K | 384K |
 | DeepSeek V4 Flash Vision | `deepseek-v4-flash-vision-exp` | — | ✓ | 960K | 64K |
 
-All variants share DeepSeek V4's 1M total context window (input + output);
-thinking variants reserve the full 384K output budget so max-effort
-reasoning chains can't be silently truncated.
+**(thinking)** variants reason in a hidden chain of thought before answering — slower and more tokens, but stronger on hard and agentic tasks; the plain variants answer directly. All variants share DeepSeek V4's 1M-token context (input + output); thinking variants reserve 384K for output so long reasoning chains are never truncated.
 
-## Native vision, no proxy
+## What you get
 
-DeepSeek shipped its first multimodal model on 2026-08-21 —
-[`deepseek-v4-flash-vision-exp`](https://api-docs.deepseek.com/news/news260821/),
-an experimental Vision variant of V4 Flash — and this provider supports it
-natively. Pick a **Flash Vision** variant in the model picker and attach
-images in Copilot Chat: they are sent to DeepSeek as base64 `data:` URLs in
-the API's multimodal content blocks, so the model sees the actual pixels.
+- Extended thinking with selectable depth (`high` / `max`), and the reasoning chain carried across multi-turn agent loops
+- Agent-mode tool calling across long multi-turn loops — tool results and the model's own reasoning are carried from turn to turn
+- Native image input on the Vision variants
+- Live account balance in the status bar (CNY / USD auto-detected); the hover adds session spend and DeepSeek's peak / off-peak pricing windows in local time, with the current one marked
+- Context-window usage in Copilot Chat's native indicator (needs VS Code 1.120+)
+- Actionable error messages (400 / 401 / 402 / 422 / 429) and automatic retry on transient failures
+- A first-run walkthrough; without a key the picker entries show a warning instead of disappearing
 
-What earlier versions of this README promised still holds: we never route
-your images through a "vision proxy" (a different multimodal model that
-describes the picture to DeepSeek). On the Vision variants DeepSeek sees
-the image itself; on the text-only variants image attachments are dropped
-with a warning in the log — never silently paraphrased by another model.
+## Images (Vision variants)
 
-Vision notes:
+Pick a **Flash Vision** variant and attach images in Copilot Chat; thinking and tool calling work exactly as on Flash.
 
-- Supported formats: JPEG, PNG, GIF, WebP (DeepSeek sniffs the real format
-  from the bytes; unsupported attachments are dropped with a log warning
-  rather than failing the whole request).
-- Each image is billed at up to 384 tokens, at the same price as Flash.
-- The API caps request bodies at 48 MiB (base64 counts toward it) and a
-  single image at 32 MiB; the extension pre-checks both and tells you to
-  attach fewer/smaller images instead of surfacing an opaque server error.
-- Extended thinking, agent-mode tool calling, and the reasoning-cache
-  round-trip all work on the Vision variants exactly as on Flash.
-- The model is experimental (`-exp`) on DeepSeek's side; expect the
-  occasional rough edge until they promote it to stable.
+- Formats: JPEG, PNG, GIF, WebP. Anything else — and any image sent to a text-only variant — is dropped, never paraphrased by another model.
+- Limits: 48 MiB per request (base64 counts) and 32 MiB per image, both checked locally before sending.
+- Cost: up to 384 tokens per image, billed at Flash prices.
+- `-exp` is experimental on DeepSeek's side ([release note, 2026-08-21](https://api-docs.deepseek.com/news/news260821/)); expect rough edges.
 
-## What this plugin uniquely solves
+## Why a native provider?
 
-Generic OAI-compatible bridges drop the `reasoning_content` field when forwarding to DeepSeek. DeepSeek's thinking-mode docs require it on every prior assistant turn when tools are present, and until mid-2026 the server enforced that with a hard 400 on the second turn of any tools-enabled thinking conversation:
+Two things a generic OpenAI-compatible bridge cannot do for DeepSeek V4:
 
-```text
-The reasoning_content in the thinking mode must be passed back to the API.
-```
-
-This extension is a native VS Code Language Model Provider — it intercepts each request, restores the prior `reasoning_content` from a local cache, and re-attaches it to every assistant turn in history (not just the ones that called a tool, which is what DeepSeek actually requires when `tools` is present). Result: agent loops, multi-turn refactors and long thinking sessions work end-to-end. (Since 2026-08-22 the live API has been observed to accept those turns without `reasoning_content`; the round-trip still matters — without it the model continues each agent turn from a history with its own chain of thought removed, the server prompt-cache prefix stays byte-stable only if the same bytes are re-sent, and it keeps working unchanged if DeepSeek re-tightens the rule.)
-
-## Quick start
-
-1. Install **DeepSeek V4 for Copilot Chat** from the VS Code Marketplace.
-2. Run `Manage DeepSeek V4 Provider` from the command palette and paste your [DeepSeek API key](https://platform.deepseek.com/api_keys).
-3. Open Copilot Chat, pick a DeepSeek V4 variant from the model picker, start chatting.
+- **Reasoning round-trip.** DeepSeek's thinking mode expects each prior assistant turn's `reasoning_content` back on the next request — a hard 400 without it until a 2026-08-22 live check found the server lenient (the docs still define the rule) — and VS Code's chat history has no field for it. This extension caches it locally and re-attaches it on every request, so the model keeps its own chain of thought across agent turns and every request stays byte-identical to what DeepSeek already cached, keeping the discounted cache-hit input price.
+- **Real cost, not estimates.** Balance and session spend come from DeepSeek's `/user/balance`; cache-hit / miss tokens come from the real `usage` data.
 
 ## Commands
 
@@ -90,98 +61,50 @@ This extension is a native VS Code Language Model Provider — it intercepts eac
 | `Manage DeepSeek V4 Provider` | Set or update your API key |
 | `Refresh DeepSeek V4 Balance` | Fetch the latest account balance |
 | `Show DeepSeek V4 Log` | Open the runtime log channel |
-| `Show DeepSeek V4 Reasoning Cache Stats` | Diagnostics for the reasoning cache |
-| `Clear DeepSeek V4 Reasoning Cache` | Purge cached `reasoning_content` (e.g. before sharing a bug log, or after switching projects) |
+| `Show DeepSeek V4 Reasoning Cache Stats` | Reasoning-cache diagnostics |
+| `Clear DeepSeek V4 Reasoning Cache` | Purge cached `reasoning_content` (e.g. before sharing a log) |
 | `Clear DeepSeek V4 Session Counter` | Reset the session spend display |
-| `DeepSeek V4: Compact Copilot Chat` | Bridge to Copilot Chat's `/compact` flow when context is near the cap (no-op with a hint if Copilot Chat is not installed) |
+| `Compact Copilot Chat` | Run Copilot Chat's `/compact` when context is near the cap |
 
 ## Settings
 
 | Setting | Values | Default | Description |
 | ------ | ------ | ------ | ------ |
-| `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for `(thinking)` model variants. `high` is faster with shorter reasoning chains; `max` is the deepest setting. No effect on non-thinking variants. Picked up at request time. |
-| `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream the raw `reasoning_content` to the OutputChannel. Useful for debugging prompt-cache breakdowns but may capture private code/paths/intermediate state — keep **off** when sharing logs in bug reports. |
+| `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for the `(thinking)` variants; ignored by the others. `high` is faster with shorter chains. Applies to the next message. |
+| `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream raw `reasoning_content` to the log (only useful when debugging cache breakdowns). May capture private code — keep **off** when sharing logs. |
 
 ## Billing & the Copilot premium-request quota
 
-Everything this extension sends goes to `api.deepseek.com`, authenticated
-with **your** DeepSeek key, and is billed only to your DeepSeek balance. It
-never calls a GitHub/Copilot endpoint and has no code path that could touch
-your Copilot quota.
+Every request goes to `api.deepseek.com` with **your** key and bills your prepaid DeepSeek balance (pay-as-you-go — see [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing)), never your Copilot quota.
 
-That said, in **agent mode** the Copilot Chat host itself can spawn
-background **sub-agents** (the `agent` / `runSubagent` tool — notably the
-Explore Agent) that default to a Copilot-hosted model regardless of the
-model you picked, and those calls *do* consume Copilot premium requests.
-This is a platform behavior affecting every BYOK provider (tracked upstream
-in [community#197840](https://github.com/orgs/community/discussions/197840);
-see [#16](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/16)).
-To stop it:
+One exception comes from Copilot Chat itself: in **agent mode** it can spawn **sub-agents** (the `agent` / `runSubagent` tool — notably the Explore Agent) on a Copilot-hosted model regardless of the model you picked, and those calls *do* consume premium requests. This affects every bring-your-own-key (BYOK) provider ([community#197840](https://github.com/orgs/community/discussions/197840), [#16](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/16)). To avoid it:
 
-1. In agent mode, open the tools picker ("Configure Tools") and **uncheck
-   the `agent` / `runSubagent` tool** — most reliable.
-2. Or point the Explore Agent at your model:
-   `github.copilot.chat.exploreAgent.model` → a DeepSeek V4 model.
-3. Or use Ask mode for turns that don't need tool-calling.
+1. In agent mode, open the tools picker (the **Configure Tools** icon in the chat input) and **uncheck `agent` / `runSubagent`** — most reliable.
+2. Or set `github.copilot.chat.exploreAgent.model` to a DeepSeek V4 model.
+3. Or use Ask mode for turns that don't need tools.
 
-## FAQ / Troubleshooting
+## FAQ
 
-**The chat fails with `The reasoning_content in the thinking mode must be
-passed back to the API` (400).**
-Rare since 2026-08 — the live API stopped returning this for missing
-reasoning, but the docs still define the rule. DeepSeek's thinking mode
-requires prior assistant turns to carry their reasoning chain back. This
-extension restores it from a local cache; the error means the cache has no entry for some turn in this conversation
-(pre-extension history, a cleared cache, or eviction in a very long
-session). Recovery: start a new chat. Diagnostics: *Show DeepSeek V4
-Reasoning Cache Stats*.
+**`The reasoning_content in the thinking mode must be passed back to the API` (400).**
+Not seen since a 2026-08-22 live check (the API accepted every history shape without reasoning), but the docs still define the rule. If it appears, some assistant turn has no cached reasoning (pre-extension history, a cleared cache, or eviction in a very long session): start a new chat; *Show DeepSeek V4 Reasoning Cache Stats* diagnoses.
 
-**A warning popped up: "prompt cache hit rate dropped".**
-Your conversation's cached prompt prefix on DeepSeek's side broke — usually
-after a cancelled/failed turn or an editor restart — so subsequent turns
-bill at the much higher cache-miss input rate. The popup's *Start New Chat*
-cuts losses; *Show Cache Stats* diagnoses. See
-[#19](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/19) for
-the background.
+**"prompt cache hit rate dropped" warning.**
+Your conversation's cached prefix on DeepSeek's side broke, so further turns bill at the full (cache-miss) input price instead of the discounted cache-hit price. The extension cannot tell why — a turn cancelled or failed mid-stream, eviction in a very long session, or an editor restart are all possible. *Start New Chat* cuts losses; *Show Cache Stats* diagnoses. Background: [#19](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/19).
 
-**Copilot's context-window indicator shows 0 / 0%.**
-Update VS Code to **1.120 or newer**. The extension has always reported
-usage, but the host code that displays it for extension-provided models
-only shipped in VS Code 1.120
-([#18](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/18),
-[microsoft/vscode#315394](https://github.com/microsoft/vscode/issues/315394)).
+**Copilot's context indicator shows 0 / 0%.**
+Update to VS Code **1.120+** — earlier hosts don't display usage for extension-provided models ([#18](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/18), [microsoft/vscode#315394](https://github.com/microsoft/vscode/issues/315394)).
 
-**My image attachment seems to be ignored.**
-Images are only sent on the **Flash Vision** variants — on text-only
-variants they are dropped with a log warning (never proxied through another
-model). Also check the format (JPEG/PNG/GIF/WebP) and total request size
-(DeepSeek caps request bodies at 48 MiB — base64 counts toward it — and
-single images at 32 MiB).
+**My image attachment is ignored.**
+Only the Flash Vision variants send images. Check the format and the 48 MiB / 32 MiB limits above.
 
-**Why is there no OpenRouter / custom base-URL support?**
-Deliberate — see the discussion in
-[#4](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/4).
-OpenRouter normalizes DeepSeek's thinking protocol to a different shape
-(`reasoning_details` instead of `reasoning_content`, different
-thinking-enable parameter, no cache-hit accounting), which breaks exactly
-the things this extension exists to deliver. OpenRouter-based DeepSeek
-access belongs in a separate provider (e.g.
-[ostash/openrouter-chat-provider](https://github.com/ostash/openrouter-chat-provider),
-built by the requester of #4).
+**No OpenRouter / custom base URL?**
+Deliberate ([#4](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/4)): OpenRouter reshapes DeepSeek's thinking protocol (`reasoning_details` instead of `reasoning_content`, a different thinking switch, no cache-hit accounting) — exactly what this extension depends on. For OpenRouter use a dedicated provider such as [ostash/openrouter-chat-provider](https://github.com/ostash/openrouter-chat-provider).
 
 ## Privacy
 
-- **No telemetry.** The extension phones home to nobody; the only network
-  peer is `api.deepseek.com`.
-- Your API key lives in VS Code **SecretStorage** (OS keychain), never in
-  settings files.
-- The persistent reasoning cache can contain fragments of your code and
-  prompts; *Clear DeepSeek V4 Reasoning Cache* purges it (e.g. before
-  sharing logs or switching projects), and `deepseekv4.logRawReasoning`
-  stays **off** by default so reasoning never hits the log channel
-  unasked.
-- Image attachments are sent directly to DeepSeek as part of your request
-  and are never routed through any third-party model.
+- **No telemetry.** The only network peer is `api.deepseek.com`; images go only there.
+- Your API key lives in VS Code **SecretStorage** (OS keychain), never in settings files.
+- The reasoning cache is stored on disk (it survives VS Code restarts) and can hold fragments of your code and prompts; *Clear DeepSeek V4 Reasoning Cache* purges it, and `deepseekv4.logRawReasoning` is off by default.
 
 ## License
 
