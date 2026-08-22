@@ -21,6 +21,7 @@ Closes #
 - [ ] `npm run lint` passes
 - [ ] Manually tested in Extension Development Host
 - [ ] Relevant `test/integration_*.mjs` still pass (if protocol-layer change)
+- [ ] Docs synced (CHANGELOG; ARCHITECTURE and README + README.zh-CN if user-facing)
 
 ## Notes for reviewers
 
