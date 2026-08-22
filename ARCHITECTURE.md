@@ -510,6 +510,32 @@ On every chat completion we call `scheduleBalanceRefresh()`, which arms a 1.5-se
 
 Pending timers are cleared in `dispose()` to avoid late callbacks against torn-down resources.
 
+## Test strategy
+
+Three layers, all run by `npm test` from the compiled `out/`:
+
+- **Pure-module unit suites** (`test/unit_*.mjs`) import `../out/*.js` in
+  plain Node; nothing in their import chain touches `vscode`. They pin the
+  protocol-layer invariants: the serialized request body (golden), SSE
+  rules, fingerprint and wire-alias algorithms, tool payload sanitization,
+  the model catalog, and the package.json contract (`unit_manifest.mjs`).
+- **Adapter suites** (`test/adapter_*.mjs`, run by `node test/run_tests.mjs adapter`
+  with `node --require test/vscode_shim/register.cjs`) exercise the real
+  `out/utils.js`, `out/provider.js` and `out/extension.js` against a
+  minimal hand-written `vscode` (`test/vscode_shim/index.cjs`): part
+  classes, enums, `MarkdownString`, `EventEmitter`, and recordable
+  `window` / `commands` / `workspace` / `env` / `lm` stubs with preset
+  answers. Fakes for `SecretStorage`, `Memento`, `OutputChannel`,
+  `StatusBarItem`, SSE streams and `fetch` live in `test/helpers/fakes.mjs`.
+  `adapter_request_golden.mjs` is the end-to-end wire gate (VS Code history
+  → request bytes); the provider suites cover streaming, cancellation and
+  the `finally`-path persist, error → notification mapping, the usage
+  pipeline, the picker, and activation.
+- **Integration scripts** (below) hit the live API and are the final word on
+  protocol questions.
+
+`npm run test:coverage` wraps the same run in c8 (devDependency only).
+
 ## Integration tests
 
 Files in `test/integration_*.mjs` hit the live DeepSeek API directly, **bypassing VS Code**, and serve as protocol-layer sanity checks:

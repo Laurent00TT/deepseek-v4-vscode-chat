@@ -47,9 +47,14 @@ it silently costs users money or orphans their persisted state.
 
 Logic that can be vscode-free lives in leaf modules (`sse.ts`,
 `request_body.ts`, `image_content.ts`, `tool_payload.ts`, `tool_names.ts`,
-`model_catalog.ts`, `api_client.ts`, …) and is unit-tested from the
-compiled output (`test/unit_*.mjs` import `../out/*.js` in plain Node — no
-vscode mock). provider.ts keeps the host-coupled seams: progress emission,
+`model_catalog.ts`, `api_client.ts`, …) and is unit-tested from the compiled output (`test/unit_*.mjs` import
+`../out/*.js` in plain Node — no vscode anywhere in the import chain).
+The vscode-coupled adapters (`utils.ts`, `provider.ts`, `extension.ts`) are
+tested as compiled too, under a **minimal `vscode` replacement**
+(`test/vscode_shim/`, injected by `node --require`; `test/adapter_*.mjs`).
+The shim may grow new APIs the adapters use, never behaviour VS Code does
+not have — it records calls and returns preset answers, nothing else.
+provider.ts keeps the host-coupled seams: progress emission,
 dialogs, config reads, the stream reader loop, the `finally`-path reasoning
 persist. When you add logic, put the decision in a pure module and the
 side effect in the adapter, and never import a vscode-tainted module (like
@@ -62,7 +67,8 @@ Run all of it before pushing; CI runs the same set:
 ```bash
 npm run compile        # tsc
 npm run lint           # eslint
-npm test               # all unit suites (compiled output)
+npm test               # unit suites (pure modules) + adapter suites (vscode shim)
+npm run test:coverage  # same, with a c8 coverage report
 npx prettier --check . # formatting is CI-enforced; prettier is pinned
 npx @vscode/vsce package -o /tmp/x.vsix   # packaging sanity
 ```
@@ -75,6 +81,10 @@ DEEPSEEK_API_KEY=sk-... node test/integration_tools_present.mjs  # reasoning rou
 DEEPSEEK_API_KEY=sk-... node test/integration_vision.mjs         # multimodal wire shape
 DEEPSEEK_API_KEY=sk-... node test/integration_vision_multiturn.mjs # vision + tools + reasoning over three turns; records image prompt-cache hits
 ```
+
+`test/adapter_request_golden.mjs` is the end-to-end wire gate — if it fails
+after an upgrade, compare the dumped body against the documented shape
+before touching the literal.
 
 Manual pass in the Extension Development Host (F5) before a release:
 picker shows all variants, a thinking turn streams, an agent turn
