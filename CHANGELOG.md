@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-25
+
+### Removed
+
+- **The peak / off-peak pricing panel ([#22](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/22)) is gone**, along with `src/off_peak.ts`, the boundary-refresh timer, and `test/unit_off_peak.mjs`. It encoded a **vendor policy** — which hours DeepSeek bills at the peak rate — and vendor policy drifts. The module's own header made the argument that condemns it: *"Only the WINDOW is encoded here — never prices or multipliers. Prices drift… and the real bill is always taken from `/user/balance`."* The window drifts too. DeepSeek had already replaced one schedule (the V3/R1 discount ran 16:30–00:30 UTC) with another, and [#25](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/25) showed the cost of getting a transcription of it subtly wrong: the panel reported Peak for 14 hours every weekend — through the whole of 0.3.11 and 0.4.0 — because the published rule is restricted to Monday–Friday and the weekday clause was dropped. A panel that is wrong about money is worse than no panel.
+
+  The second reason is timezone exposure. The *state* was timezone-safe (it read only absolute-instant UTC fields), but the *rendering* used `Date#getTimezoneOffset()` — the **extension host's** offset. Under Remote-SSH, WSL or a devcontainer that is typically UTC, so a Beijing user was shown `01:00–04:00` instead of `09:00–12:00`. Fixing that properly needs a client-side timezone the extension API does not readily expose.
+
+  What remains is the part that cannot go stale: the live balance from `/user/balance` and session spend computed by differencing it. Both READMEs now point at DeepSeek's pricing page for the current schedule instead of restating it. Issue #25 is fixed by removal rather than by correction.
+
+### Fixed
+
+- **The status-bar hover drew two horizontal rules with nothing between them** until a turn had reported usage. The cache-hit row is conditional but its closing rule was not, so the empty section still rendered its own separator. The rule now belongs to the row. Pre-existing since the row was added; it became the most visible thing in the tooltip once the pricing panel above it was removed. Pinned by the new `test/adapter_status_tooltip.mjs`.
+
 ## [0.4.0] - 2026-08-22
 
 ### Added

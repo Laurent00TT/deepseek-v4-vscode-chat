@@ -1,6 +1,6 @@
 # DeepSeek V4 for Copilot Chat
 
-> 🌐 本文是英文 [README](./README.md) 的中文版，**以英文版为准**；协议细节见英文 [ARCHITECTURE](./ARCHITECTURE.md)。同步时间：2026-08-22。发现两版不一致欢迎提 issue。
+> 🌐 本文是英文 [README](./README.md) 的中文版，**以英文版为准**；协议细节见英文 [ARCHITECTURE](./ARCHITECTURE.md)。同步时间：2026-08-25。发现两版不一致欢迎提 issue。
 
 在 VS Code Copilot Chat 里把 DeepSeek V4（Pro / Flash / Flash Vision）当原生模型用 —— 扩展思考、Agent 模式工具调用、图片输入，以及状态栏里你真实的 DeepSeek 账单。
 
@@ -35,7 +35,7 @@
 - 扩展思考，深度可选（`high` / `max`），推理链跨多轮 Agent 循环保留
 - Agent 模式工具调用，长多轮循环照常工作 —— 工具结果和模型自己的推理逐轮带下去
 - Vision 变体原生支持图片输入
-- 状态栏实时显示账户余额（自动识别 CNY / USD）；悬浮层另有本次会话花费，以及按本地时间列出的 DeepSeek 高峰 / 非高峰计费窗口并标出当前所处的一段
+- 状态栏实时显示账户余额（自动识别 CNY / USD）；悬浮层另有本次会话花费
 - 上下文窗口用量接入 Copilot Chat 原生指示器（需 VS Code 1.120+）
 - 带处理建议的错误提示（400 / 401 / 402 / 422 / 429），临时故障自动重试
 - 首次运行演练（Walkthrough）；未设密钥时选择器条目显示警告而不是消失
@@ -78,6 +78,8 @@
 ## 计费与 Copilot 高级请求配额
 
 每个请求都只发往 `api.deepseek.com`，用**你的**密钥认证，从你预付的 DeepSeek 余额扣费（按量计费，见 [DeepSeek 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)），绝不动你的 Copilot 配额。
+
+2026-08-16 起，价格还取决于你**什么时候**发请求 —— DeepSeek 区分高峰和非高峰计费，非高峰是半价。扩展**刻意不编码**这些时段：它们是厂商策略，而且已经变更过一次。当前时段请看上面的价格页。状态栏只显示那个不会过期的东西：你真实的余额，直接来自 `/user/balance`。
 
 唯一的例外来自 Copilot Chat 自身：**Agent 模式**下它可能启动**子代理**（`agent` / `runSubagent` 工具，典型如 Explore Agent），跑在 Copilot 托管模型上（无视你选的模型），这部分**会**消耗高级请求。这影响所有自带密钥（BYOK）的提供方（[community#197840](https://github.com/orgs/community/discussions/197840)、[#16](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/16)）。规避方式：
 

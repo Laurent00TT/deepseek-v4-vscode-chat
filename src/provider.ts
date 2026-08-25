@@ -28,7 +28,6 @@ import { toWireName, buildWireNameMap } from "./tool_names";
 import { assertAdvertisedToolLimit } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
-import { isPeakTime, nextBoundary, offPeakWindowsUtc, formatWindowsLocal, PEAK_WINDOWS_UTC } from "./off_peak";
 import { ContextUsageService } from "./context_usage_service";
 import { classifyRequestKind, isReportableContextRequest, type RequestKind } from "./request_kind";
 
@@ -314,11 +313,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	/** Debounce timer for the auto-refresh-after-chat path. Cleared on dispose. */
 	private _balanceRefreshTimer: NodeJS.Timeout | undefined;
 
-	/** Fires at the next peak/off-peak window edge so an idle window's
-	 * tooltip doesn't go stale across a boundary (issue #22). Re-armed on
-	 * every firing; cleared on dispose. */
-	private _peakBoundaryTimer: NodeJS.Timeout | undefined;
-
 	/** Coalesce rapid cache writes to globalState — set→set→set within ~200ms persists once. */
 	private _persistTimer: NodeJS.Timeout | undefined;
 
@@ -395,36 +389,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		);
 
 		this.refreshStatusBar();
-		this.schedulePeakBoundaryRefresh();
 
 		// Fire-and-forget initial fetch so the status bar shows balance after
 		// VS Code reload without requiring a manual hover-refresh first.
 		// Silent: errors swallowed — no-op if API key isn't configured yet.
 		void this.refreshBalance(true);
-	}
-
-	/**
-	 * Arm a one-shot timer for the next peak/off-peak window edge, then
-	 * re-arm on firing. The tooltip is declarative (see flashRefreshAck's
-	 * comment): it renders whatever `buildTooltip()` produced at the last
-	 * `refreshStatusBar()`. Chat activity rebuilds it constantly, but an
-	 * idle window that sits across a boundary (e.g. overnight) would keep
-	 * showing the stale side — this timer covers exactly that gap.
-	 *
-	 * +250ms pad so clock rounding can't fire the callback a hair BEFORE
-	 * the edge, which would render the old state and then sleep ~24h.
-	 */
-	private schedulePeakBoundaryRefresh(): void {
-		if (this._peakBoundaryTimer) {
-			clearTimeout(this._peakBoundaryTimer);
-		}
-		const now = new Date();
-		const delayMs = nextBoundary(now).getTime() - now.getTime() + 250;
-		this._peakBoundaryTimer = setTimeout(() => {
-			this._peakBoundaryTimer = undefined;
-			this.refreshStatusBar();
-			this.schedulePeakBoundaryRefresh();
-		}, delayMs);
 	}
 
 	private refreshStatusBar(): void {
@@ -545,25 +514,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		};
 		md.supportThemeIcons = true;
 
-		// Issue #22: pricing-window panel, pinned above the header as its own
-		// visually separate section. Both windows are listed in LOCAL wall-clock
-		// time and the row the system clock currently falls in carries the
-		// filled radio dot (bold label); the other row stays outlined — a
-		// read-only radio group driven by the clock. No prices or multipliers
-		// (those drift; see the session-cost rationale above the BalanceInfo
-		// interface). The dot can go stale while the hover popup is open across
-		// a window edge; the boundary timer (schedulePeakBoundaryRefresh)
-		// rebuilds the tooltip for the next hover, matching the accepted
-		// staleness model documented on flashRefreshAck.
-		const now = new Date();
-		const peakNow = isPeakTime(now);
-		const tzOffset = -now.getTimezoneOffset();
-		const row = (active: boolean, label: string, windows: string) =>
-			`${active ? "$(circle-filled)" : "$(circle-outline)"} ${active ? `**${label}**` : label} &nbsp;&nbsp; ${windows}\n\n`;
-		md.appendMarkdown(row(peakNow, "Peak/高峰", formatWindowsLocal(PEAK_WINDOWS_UTC, tzOffset)));
-		md.appendMarkdown(row(!peakNow, "Off-peak/非高峰", formatWindowsLocal(offPeakWindowsUtc(), tzOffset)));
-		md.appendMarkdown("---\n\n");
-
 		md.appendMarkdown("### DeepSeek V4\n\n");
 
 		// Balance row: refresh action sits inline next to the **Balance** label.
@@ -606,15 +556,19 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		// Cache hit-rate row — derived from the snapshot. Uses the same
 		// SI-K formatting as the tooltip header so the cached value
 		// visually matches the prompt-token row.
+		//
+		// The closing rule belongs to this section rather than to the tooltip.
+		// Before any turn has reported usage there is no row to draw, and an
+		// unconditional rule here left two horizontal lines stacked with
+		// nothing between them.
 		if (snap?.apiPromptTokens !== undefined && snap.apiPromptTokens > 0 && snap.apiCacheHitTokens !== undefined) {
 			const hitRate = snap.apiCacheHitTokens / snap.apiPromptTokens;
 			const hitPctStr = (hitRate * 100).toFixed(1);
 			md.appendMarkdown(
 				`**Cache hit (last turn)** &nbsp; ${hitPctStr}% (${formatTokenK(snap.apiCacheHitTokens)} cached)\n\n`
 			);
+			md.appendMarkdown("---\n\n");
 		}
-
-		md.appendMarkdown("---\n\n");
 
 		// Reasoning effort row: shows the current setting value plus a click-
 		// through to the specific setting. Helps discoverability — users who
@@ -875,10 +829,6 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		if (this._balanceRefreshTimer) {
 			clearTimeout(this._balanceRefreshTimer);
 			this._balanceRefreshTimer = undefined;
-		}
-		if (this._peakBoundaryTimer) {
-			clearTimeout(this._peakBoundaryTimer);
-			this._peakBoundaryTimer = undefined;
 		}
 		if (this._persistTimer) {
 			// A pending debounced write was about to flush the latest

@@ -33,7 +33,7 @@ You need VS Code 1.106+, the **GitHub Copilot Chat** extension signed in (this e
 - Extended thinking with selectable depth (`high` / `max`), and the reasoning chain carried across multi-turn agent loops
 - Agent-mode tool calling across long multi-turn loops — tool results and the model's own reasoning are carried from turn to turn
 - Native image input on the Vision variants
-- Live account balance in the status bar (CNY / USD auto-detected); the hover adds session spend and DeepSeek's peak / off-peak pricing windows in local time, with the current one marked
+- Live account balance in the status bar (CNY / USD auto-detected); the hover adds session spend
 - Context-window usage in Copilot Chat's native indicator (needs VS Code 1.120+)
 - Actionable error messages (400 / 401 / 402 / 422 / 429) and automatic retry on transient failures
 - A first-run walkthrough; without a key the picker entries show a warning instead of disappearing
@@ -76,6 +76,8 @@ Two things a generic OpenAI-compatible bridge cannot do for DeepSeek V4:
 ## Billing & the Copilot premium-request quota
 
 Every request goes to `api.deepseek.com` with **your** key and bills your prepaid DeepSeek balance (pay-as-you-go — see [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing)), never your Copilot quota.
+
+Since 2026-08-16 the rate also depends on **when** you send the request — DeepSeek bills peak and off-peak differently, and off-peak is half price. The extension deliberately does **not** encode those windows; they are vendor policy and have already changed once. Read the current schedule on the pricing page linked above. What the status bar shows is the one thing that cannot go stale: your real balance, straight from `/user/balance`.
 
 One exception comes from Copilot Chat itself: in **agent mode** it can spawn **sub-agents** (the `agent` / `runSubagent` tool — notably the Explore Agent) on a Copilot-hosted model regardless of the model you picked, and those calls *do* consume premium requests. This affects every bring-your-own-key (BYOK) provider ([community#197840](https://github.com/orgs/community/discussions/197840), [#16](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/16)). To avoid it:
 
