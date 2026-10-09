@@ -1,4 +1,4 @@
-// Tests for DeepSeek's 128-tools-per-request cap: the pure trim
+// Tests for the 128-tools-per-request cap: the pure trim
 // `capAdvertisedTools`, the REAL skip-then-cap path through
 // `buildToolPayload`, and a best-effort text pin on the provider call site.
 //
@@ -95,8 +95,8 @@ function withCapturedSkipLogs(fn) {
 }
 
 // === 1. The cap itself is pinned ===
-// Changing it silently would desynchronize the cap from DeepSeek's API
-// contract — must be a deliberate decision, not drift.
+// 128 is a compatibility budget (see tool_limit.ts) — changing it must be a
+// deliberate decision checked against the live API, not drift.
 check("MAX_TOOLS_PER_REQUEST is 128", MAX_TOOLS_PER_REQUEST, 128);
 
 // === 2. At or under the cap the advertised set passes through untouched ===

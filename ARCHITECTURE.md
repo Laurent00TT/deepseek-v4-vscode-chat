@@ -115,10 +115,15 @@ Unusable names (empty after sanitization) skip just that tool with a
 split or hash breaks fingerprint continuity for conversations that span
 extension versions, so it must be a deliberate, versioned decision.
 
-Because tools can be skipped, DeepSeek's 128-tools-per-request cap is
-applied to the **advertised** set, not `options.tools` — a host list
-slightly over 128 whose skips bring the broadcast set back under the cap is
-sent untouched. A set still over the cap is **trimmed, not rejected**
+Because tools can be skipped, the 128-tools-per-request cap is applied to
+the **advertised** set, not `options.tools` — a host list slightly over 128
+whose skips bring the broadcast set back under the cap is sent untouched.
+Identical duplicate host names are advertised once (first wins): the API
+requires unique tool names, and a duplicate would also take a second slot.
+128 itself is a compatibility budget rather than a verified server maximum:
+DeepSeek's API reference said "A max of 128 functions are supported" as of
+2025-08 but now only requires unique names, and VS Code's own BYOK proxy
+caps at 128 too. A set still over the cap is **trimmed, not rejected**
 (issue #27): not every host caps before calling the provider — VS Code
 1.140's agent host forwarded every tool to BYOK models and retried the
 thrown error as a 502 — so throwing made chat unusable for anyone with

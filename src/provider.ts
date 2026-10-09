@@ -698,15 +698,15 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	/**
-	 * Single-shot warning when a request offered more tools than DeepSeek
-	 * accepts and capAdvertisedTools left some out. Every capped request
-	 * logs the dropped names; the toast only says it happened and where the
-	 * user decides instead — Configure Tools, since which tools matter is
-	 * the user's call, not a guess the cap can make for them.
+	 * Single-shot warning when a request offered more tools than the
+	 * 128-tool budget and capAdvertisedTools left some out. Every capped
+	 * request logs the dropped names; the toast only says it happened and
+	 * where the user decides instead — Configure Tools, since which tools
+	 * matter is the user's call, not a guess the cap can make for them.
 	 */
 	private async warnToolsCapped(advertised: number, dropped: number): Promise<void> {
 		const choice = await vscode.window.showWarningMessage(
-			`DeepSeek accepts at most ${MAX_TOOLS_PER_REQUEST} tools per request, but this chat offers ${advertised}, so ${dropped} ${dropped === 1 ? "was" : "were"} left out (listed in the log). To choose which tools DeepSeek gets, turn some off with Configure Tools in the chat input.`,
+			`This chat offers ${advertised} tools, but DeepSeek V4 sends at most ${MAX_TOOLS_PER_REQUEST} per request, so ${dropped} ${dropped === 1 ? "was" : "were"} left out (listed in the log). Tools the conversation already used are kept. To choose which tools DeepSeek gets, turn some off with Configure Tools in the chat input.`,
 			"Show Log"
 		);
 		if (choice === "Show Log") {

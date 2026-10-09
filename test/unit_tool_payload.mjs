@@ -72,4 +72,10 @@ checkDeep("nested objects sanitized recursively", one({ name: "a", inputSchema: 
 // --- skips (already covered in unit_tool_limit; one representative here) ---
 const skipped = silent(() => buildToolPayload([{ name: "ok" }, { name: "" }, null, { name: 7 }], false));
 check("unusable entries skipped, usable kept", skipped.tools.length, 1);
+// An identical name listed twice is one tool: the API requires unique tool
+// names, and a duplicate would also take a second slot under the 128 cap.
+const dup = buildToolPayload([{ name: "same", description: "first" }, { name: "same", description: "second" }], true);
+check("identical duplicate names advertised once", dup.tools.length, 1);
+check("…first definition wins", dup.tools[0].function.description, "first");
+checkDeep("…so Required forces that one tool by name", dup.tool_choice, { type: "function", function: { name: "same" } });
 summary("unit_tool_payload");

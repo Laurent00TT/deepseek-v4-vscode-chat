@@ -1,7 +1,12 @@
 /**
- * Pure cap for DeepSeek's 128-tools-per-request limit. Extracted from
- * provider.ts so the boundary is vscode-free and unit-testable without a
- * vscode mock (same pattern as tool_choice.ts).
+ * Pure cap for the 128-tools-per-request budget. Extracted from provider.ts
+ * so the boundary is vscode-free and unit-testable without a vscode mock
+ * (same pattern as tool_choice.ts).
+ *
+ * 128 is a compatibility budget, not a verified server maximum: DeepSeek's
+ * API reference said "A max of 128 functions are supported" (as of 2025-08)
+ * but now only requires unique names, and VS Code's own BYOK proxy caps at
+ * 128 too. Raise it only after checking the live API.
  *
  * The cap applies to the ADVERTISED (wire) tool set — what buildToolPayload
  * actually broadcasts to the API — not the raw host list. Since the issue #20
