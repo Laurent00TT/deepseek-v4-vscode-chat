@@ -25,7 +25,7 @@ import { buildRequestBody, coerceReasoningEffort } from "./request_body";
 import { MODEL_VARIANTS, findVariant } from "./model_catalog";
 import { BASE_URL, BALANCE_URL, fetchWithRetry, formatApiError, type BalanceInfo } from "./api_client";
 import { toWireName, buildWireNameMap } from "./tool_names";
-import { assertAdvertisedToolLimit } from "./tool_limit";
+import { MAX_TOOLS_PER_REQUEST, capAdvertisedTools } from "./tool_limit";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 import { ContextUsageService } from "./context_usage_service";
@@ -300,6 +300,12 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * compacted or started new chat) so the next fill-up re-arms it.
 	 * Manually reset by clearSession / secret-change. */
 	private _contextNudgeFired = false;
+
+	/** Whether the "tools over the 128 cap were left out" warning has
+	 * fired. Once per session: an agent turn makes many requests with the
+	 * same tool set, and every capped request is logged to the output
+	 * channel anyway. */
+	private _toolCapWarned = false;
 
 	/** Shared context-usage state. Written by `provideLanguageModelChatResponse`
 	 * (estimate before request, API values after), read by the status-bar
@@ -691,6 +697,23 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 		}
 	}
 
+	/**
+	 * Single-shot warning when a request offered more tools than DeepSeek
+	 * accepts and capAdvertisedTools left some out. Every capped request
+	 * logs the dropped names; the toast only says it happened and where the
+	 * user decides instead — Configure Tools, since which tools matter is
+	 * the user's call, not a guess the cap can make for them.
+	 */
+	private async warnToolsCapped(advertised: number, dropped: number): Promise<void> {
+		const choice = await vscode.window.showWarningMessage(
+			`DeepSeek accepts at most ${MAX_TOOLS_PER_REQUEST} tools per request, but this chat offers ${advertised}, so ${dropped} ${dropped === 1 ? "was" : "were"} left out (listed in the log). To choose which tools DeepSeek gets, turn some off with Configure Tools in the chat input.`,
+			"Show Log"
+		);
+		if (choice === "Show Log") {
+			this.outputChannel.show(true);
+		}
+	}
+
 	private log(message: string, data?: unknown): void {
 		const ts = new Date().toISOString().slice(11, 23);
 		const dataStr = data !== undefined ? " " + safeStringify(data) : "";
@@ -1012,7 +1035,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 					maxInputTokens: v.maxInputTokens,
 					maxOutputTokens: v.maxOutputTokens,
 					capabilities: {
-						toolCalling: true,
+						// A number declares the per-request tool cap (public API).
+						// VS Code currently reads it only as a boolean; the request
+						// path still caps on its own (capAdvertisedTools).
+						toolCalling: MAX_TOOLS_PER_REQUEST,
 						// Vision variants accept image attachments; Copilot Chat only
 						// enables the attach-image UI when this is true.
 						imageInput: v.vision === true,
@@ -1172,12 +1198,29 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// the issue #20 wire-aliasing fix, tool assembly may skip
 			// unusable/colliding tools, so the host list can be over 128
 			// while the set actually broadcast to the API is legal. The
-			// guard's parameter type makes feeding the host list a compile
-			// error; see tool_limit.ts.
-			assertAdvertisedToolLimit(toolConfig.tools);
+			// cap's parameter type makes feeding the host list a compile
+			// error. Over the cap it trims instead of failing the request
+			// (issue #27), keeping tools the history already called — read
+			// from openaiMessages, which carries the same wire names as the
+			// advertised defs; see tool_limit.ts.
+			const { tools: sentTools, dropped: droppedTools } = capAdvertisedTools(
+				toolConfig.tools,
+				new Set(openaiMessages.flatMap((m) => m.tool_calls?.map((c) => c.function.name) ?? []))
+			);
+			if (droppedTools.length > 0) {
+				this.log("request.tools_capped", {
+					advertised: toolConfig.tools?.length,
+					sent: sentTools?.length,
+					dropped: droppedTools,
+				});
+				if (!this._toolCapWarned) {
+					this._toolCapWarned = true;
+					void this.warnToolsCapped(toolConfig.tools?.length ?? 0, droppedTools.length);
+				}
+			}
 
 			const messageChars = this.countMessageChars(messages);
-			const toolChars = this.countToolChars(toolConfig.tools);
+			const toolChars = this.countToolChars(sentTools);
 			// Per-request char count lives in a LOCAL — if it were on the
 			// instance, two concurrent provideLanguageModelChatResponse calls
 			// could overwrite each other between the fetch and the usage
@@ -1248,7 +1291,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				reasoningEffort: effort,
 				maxOutputTokens: model.maxOutputTokens,
 				modelOptions: options.modelOptions as Record<string, unknown> | undefined,
-				tools: toolConfig.tools,
+				tools: sentTools,
 				tool_choice: toolConfig.tool_choice,
 			});
 			// Serialize once: reused for the size guard and the fetch body.

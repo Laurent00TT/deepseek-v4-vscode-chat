@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chats with more than 128 tools failed on every prompt ([#27](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/27)).** DeepSeek accepts at most 128 tools per request, and the pre-request guard threw `Cannot have more than 128 tools per request.` whenever the advertised set was larger. VS Code 1.140's agent host forwards every tool — built-in, MCP and extension — to BYOK models without capping, and its local proxy turns a provider error into an HTTP 502 that the Copilot runtime retries five times, so users with many tools enabled saw `Failed to get response from the AI model; retried 5 times … Last error: 502 Cannot have more than 128 tools per request.` The cap (`capAdvertisedTools` in `src/tool_limit.ts`, replacing `assertAdvertisedToolLimit`) now trims instead of throwing: tools the conversation already called are kept first, the remaining budget follows the host's order (built-in tools first), and kept tools stay in their original order so the prompt-cache prefix is stable — the same policy VS Code 1.141 adopted for its own BYOK cap. Every capped request logs the dropped tool names; a one-time warning says how many were left out and points at **Configure Tools**. The model info now also declares `capabilities.toolCalling: 128`, the public API's way to state the limit (VS Code currently reads it only as a boolean). `test/unit_tool_limit.mjs` pins the trim policy, and `test/adapter_provider_request.mjs` runs the issue's scenario end to end: 130 tools with the last one already called → 128 sent, that one kept, warning shown once.
+
 ## [0.4.1] - 2026-08-25
 
 ### Removed

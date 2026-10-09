@@ -4,7 +4,7 @@
  * collision/unusable skips (issue #20), and tool_choice resolution.
  *
  * Extracted from `convertTools` in utils.ts — which remains as a thin vscode
- * adapter (enum → boolean) — so the REAL skip-then-count path is importable
+ * adapter (enum → boolean) — so the REAL skip-then-cap path is importable
  * by the Node unit harness (test/unit_tool_limit.mjs) without a vscode mock.
  * Third instance of the repo's vscode-free extraction pattern
  * (tool_names.ts, tool_choice.ts).

@@ -1,26 +1,31 @@
-// Tests for DeepSeek's 128-tools-per-request cap: the pure guard
-// `assertAdvertisedToolLimit`, the REAL skip-then-count path through
+// Tests for DeepSeek's 128-tools-per-request cap: the pure trim
+// `capAdvertisedTools`, the REAL skip-then-cap path through
 // `buildToolPayload`, and a best-effort text pin on the provider call site.
 //
 // The cap counts the ADVERTISED (wire) tool set — what is actually broadcast
 // to the API — not the raw host list. Since the issue #20 wire-aliasing fix,
 // tool assembly may skip unusable or colliding tools, so the host list can
-// exceed 128 while the broadcast set is legal. Counting the host list (the
-// pre-fix behavior in provider.ts) killed such requests for a violation that
-// never reached the wire.
+// exceed 128 while the broadcast set is legal.
+//
+// Over the cap the set is TRIMMED instead of failing the request (issue #27:
+// VS Code 1.140's agent host forwarded every tool to BYOK models and retried
+// the thrown error as a 502, so the chat never worked). Tools the history
+// already called are kept first, then the host's order, and the kept tools
+// stay in their original order — the same policy as VS Code 1.141's own BYOK
+// cap (`capBridgeTools`).
 //
 // Three layers of protection, strongest first:
-//   1. TYPES — `assertAdvertisedToolLimit` takes the advertised
+//   1. TYPES — `capAdvertisedTools` takes the advertised
 //      `OpenAIFunctionToolDef[]`, which is structurally incompatible with
 //      VS Code's host tool list AND with a bare number, so feeding
 //      `options.tools` (or any hand-computed count) is a COMPILE error.
 //      Nothing here can test that; tsc enforces it on every build.
-//   2. BEHAVIOR — section 3 runs the real headline scenario through
-//      `buildToolPayload` (vscode-free): a 130-tool host list with 5
-//      unusable names advertises 125 defs and passes the guard; 129 usable
-//      names throw.
-//   3. TEXT PIN (best-effort) — section 4 scans comment-stripped compiled
-//      `out/provider.js` for "guard call present" and "no inline host-list
+//   2. BEHAVIOR — sections 2–4 pin the trim policy and run the real
+//      headline scenario through `buildToolPayload` (vscode-free): a
+//      130-tool host list with 5 unusable names advertises 125 defs and is
+//      sent untouched; 129 usable names are trimmed to 128.
+//   3. TEXT PIN (best-effort) — section 5 scans comment-stripped compiled
+//      `out/provider.js` for "cap call present" and "no inline host-list
 //      count check". Types can't force a call to EXIST, so this is
 //      defense-in-depth against deleting the call or re-adding a host-list
 //      pre-check. It is deliberately minimal and NOT a guarantee: a
@@ -32,7 +37,7 @@
 
 import process from "node:process";
 import { readFileSync } from "node:fs";
-import { MAX_TOOLS_PER_REQUEST, assertAdvertisedToolLimit } from "../out/tool_limit.js";
+import { MAX_TOOLS_PER_REQUEST, capAdvertisedTools } from "../out/tool_limit.js";
 import { buildToolPayload } from "../out/tool_payload.js";
 
 let passed = 0;
@@ -50,16 +55,7 @@ function check(label, got, expected) {
 	}
 }
 
-function throwsWith(fn) {
-	try {
-		fn();
-		return { threw: false, message: undefined };
-	} catch (e) {
-		return { threw: true, message: e instanceof Error ? e.message : String(e) };
-	}
-}
-
-/** n minimal advertised tool defs, the shape the guard is typed against. */
+/** n minimal advertised tool defs, the shape the cap is typed against. */
 function mkAdvertised(n) {
 	return Array.from({ length: n }, (_, i) => ({
 		type: "function",
@@ -75,6 +71,9 @@ function mkHostTools(n, prefix = "host_tool") {
 		inputSchema: { type: "object", properties: {} },
 	}));
 }
+
+const names = (defs) => (defs ?? []).map((d) => d.function.name).join(",");
+const NO_CALLS = new Set();
 
 /**
  * Run fn with console.error captured: buildToolPayload logs one line per
@@ -96,67 +95,85 @@ function withCapturedSkipLogs(fn) {
 }
 
 // === 1. The cap itself is pinned ===
-// Changing it silently would desynchronize the guard from DeepSeek's API
+// Changing it silently would desynchronize the cap from DeepSeek's API
 // contract — must be a deliberate decision, not drift.
 check("MAX_TOOLS_PER_REQUEST is 128", MAX_TOOLS_PER_REQUEST, 128);
 
-// === 2. Guard boundary over advertised tool-def arrays ===
-check("undefined (no tools advertised) passes", throwsWith(() => assertAdvertisedToolLimit(undefined)).threw, false);
-check("empty array passes", throwsWith(() => assertAdvertisedToolLimit([])).threw, false);
-check("1 advertised tool passes", throwsWith(() => assertAdvertisedToolLimit(mkAdvertised(1))).threw, false);
-check(
-	"exactly 128 advertised tools passes (cap is inclusive)",
-	throwsWith(() => assertAdvertisedToolLimit(mkAdvertised(128))).threw,
-	false,
-);
-const over = throwsWith(() => assertAdvertisedToolLimit(mkAdvertised(129)));
-check("129 advertised tools throws", over.threw, true);
-check("error message names the 128 cap", /128 tools/.test(over.message ?? ""), true);
-check("far over the cap throws too", throwsWith(() => assertAdvertisedToolLimit(mkAdvertised(300))).threw, true);
+// === 2. At or under the cap the advertised set passes through untouched ===
+const none = capAdvertisedTools(undefined, NO_CALLS);
+check("undefined (no tools advertised) stays undefined", none.tools, undefined);
+check("…and drops nothing", none.dropped.length, 0);
+const empty = [];
+check("empty array passes through as-is", capAdvertisedTools(empty, NO_CALLS).tools, empty);
+const atCap = mkAdvertised(128);
+const atCapRun = capAdvertisedTools(atCap, NO_CALLS);
+check("exactly 128 passes through as the same array (cap is inclusive)", atCapRun.tools, atCap);
+check("…and drops nothing", atCapRun.dropped.length, 0);
 
-// === 3. The real headline scenario, executed end to end ===
+// === 3. Over the cap: trim, never throw ===
+const over = mkAdvertised(129);
+const overRun = capAdvertisedTools(over, NO_CALLS);
+check("129 advertised → 128 sent", overRun.tools.length, 128);
+check("…the host's first 128, in order", names(overRun.tools), names(over.slice(0, 128)));
+check("…the last one is reported dropped", overRun.dropped.join(","), "tool_128");
+check("input array is not mutated", over.length, 129);
+const farOverRun = capAdvertisedTools(mkAdvertised(300), NO_CALLS);
+check("far over the cap → 128 sent", farOverRun.tools.length, 128);
+check("…172 dropped", farOverRun.dropped.length, 172);
+// Called tools are kept even when they sit past the cut: a plain first-128
+// slice would drop tool_129, which the conversation is actively using.
+const calledRun = capAdvertisedTools(mkAdvertised(130), new Set(["tool_129", "tool_5"]));
+check("called tools still 128 sent", calledRun.tools.length, 128);
+check("a called tool past the cut is kept", calledRun.tools.at(-1)?.function.name, "tool_129");
+check("kept tools stay in advertised order", calledRun.tools[0]?.function.name, "tool_0");
+check("the budget it takes comes off the uncalled tail", calledRun.dropped.join(","), "tool_127,tool_128");
+check(
+	"called names that aren't advertised change nothing",
+	capAdvertisedTools(over, new Set(["no_such_tool"])).dropped.join(","),
+	"tool_128",
+);
+
+// === 4. The real headline scenario, executed end to end ===
 // Host list OVER the cap whose skips bring the advertised set back under it.
 // 5 of 130 names are unusable (empty / non-string — the issue #20 skip
-// class), so exactly 125 defs are advertised: a legal request the old
-// `options.tools.length > 128` check killed.
+// class), so exactly 125 defs are advertised and sent untouched.
 const hostOverCap = [...mkHostTools(125), ...Array.from({ length: 5 }, () => ({ name: "", description: "" }))];
 check("scenario premise: host list exceeds the cap", hostOverCap.length > MAX_TOOLS_PER_REQUEST, true);
 const overCapRun = withCapturedSkipLogs(() => buildToolPayload(hostOverCap, false));
 const payload = overCapRun.result;
 check("5 unusable names are skipped → 125 advertised", payload.tools?.length, 125);
 check("each skipped tool logged one diagnostic line", overCapRun.skipLogs, 5);
-check(
-	"over-cap host list with legal advertised set passes the guard",
-	throwsWith(() => assertAdvertisedToolLimit(payload.tools)).threw,
-	false,
-);
-// Counter-case: when the ADVERTISED set itself is over the cap, the guard
-// still fires — skips don't grant amnesty to a genuinely oversized request.
+const legalRun = capAdvertisedTools(payload.tools, NO_CALLS);
+check("over-cap host list with legal advertised set is sent untouched", legalRun.tools, payload.tools);
+check("…nothing dropped", legalRun.dropped.length, 0);
+// When the ADVERTISED set itself is over the cap, it is trimmed — skips
+// don't grant amnesty to a genuinely oversized request.
 const genuinelyOver = withCapturedSkipLogs(() =>
-	buildToolPayload([...mkHostTools(129), { name: "", description: "" }], false),
+	buildToolPayload([...mkHostTools(129), { name: "", description: "" }], true),
 ).result;
 check("129 usable of 130 → 129 advertised", genuinelyOver.tools?.length, 129);
-check(
-	"over-cap ADVERTISED set still throws",
-	throwsWith(() => assertAdvertisedToolLimit(genuinelyOver.tools)).threw,
-	true,
-);
+const trimmed = capAdvertisedTools(genuinelyOver.tools, NO_CALLS);
+check("over-cap ADVERTISED set is trimmed to 128", trimmed.tools.length, 128);
+check("…dropping the host's last tool", trimmed.dropped.join(","), "host_tool_128");
+// tool_choice is resolved before the cap; a multi-tool "required" stays
+// valid for the trimmed set (a named force only exists for exactly 1 tool).
+check("Required mode over the cap resolves to the multi-tool literal", genuinelyOver.tool_choice, "required");
 // The all-unusable degenerate: buildToolPayload returns {} (no tools key),
-// and `undefined` passes the guard — a tool-less request is legal however
+// and `undefined` passes the cap — a tool-less request is legal however
 // large the host list was. Deliberate; see CHANGELOG.
 const allUnusableRun = withCapturedSkipLogs(() => buildToolPayload(Array.from({ length: 130 }, () => ({ name: "" })), false));
 check("all-unusable host list advertises nothing", allUnusableRun.result.tools, undefined);
 check("all 130 unusable tools logged diagnostics", allUnusableRun.skipLogs, 130);
 check(
-	"tool-less payload passes the guard regardless of host size",
-	throwsWith(() => assertAdvertisedToolLimit(allUnusableRun.result.tools)).threw,
-	false,
+	"tool-less payload passes the cap regardless of host size",
+	capAdvertisedTools(allUnusableRun.result.tools, NO_CALLS).tools,
+	undefined,
 );
 
-// === 4. Best-effort text pin on the compiled provider call site ===
-// Types can't force the guard call to EXIST in provider.ts, and provider.ts
+// === 5. Best-effort text pin on the compiled provider call site ===
+// Types can't force the cap call to EXIST in provider.ts, and provider.ts
 // can't be imported here (it needs the runtime `vscode` module). So scan the
-// compiled text for the two properties types can't give us: the guard is
+// compiled text for the two properties types can't give us: the cap is
 // called, and no inline host-list count check has crept back. Comments are
 // stripped first so prose mentioning either pattern can neither satisfy nor
 // trip the pin (tsc preserves comments; a commented-out call must not count).
@@ -204,7 +221,7 @@ function stripComments(src) {
 }
 
 const providerJs = stripComments(readFileSync(new URL("../out/provider.js", import.meta.url), "utf8"));
-check("provider calls the guard (live code, comments stripped)", providerJs.includes("assertAdvertisedToolLimit"), true);
+check("provider calls the cap (live code, comments stripped)", providerJs.includes("capAdvertisedTools"), true);
 // Catches the natural respellings of the old bug in one shape family:
 // `options.tools….length … >` — covers `options.tools.length > 128`,
 // `options.tools?.length ?? 0) > MAX_TOOLS_PER_REQUEST`,

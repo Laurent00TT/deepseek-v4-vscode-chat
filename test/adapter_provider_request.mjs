@@ -1,8 +1,9 @@
 // Request assembly and post-usage behaviour of provideLanguageModelChatResponse:
 // headers/body, pre-flight guards (token overflow, 32 MiB image, 48 MiB body),
-// API error → notification mapping, and the usage pipeline (estimator EMA,
-// usage DataPart gating, cache-breakdown warning, context nudge hysteresis).
-import { check, checkMatch, summary, withConsole } from "./helpers/check.mjs";
+// the 128-tool cap, API error → notification mapping, and the usage pipeline
+// (estimator EMA, usage DataPart gating, cache-breakdown warning, context
+// nudge hysteresis).
+import { check, checkDeep, checkMatch, summary, withConsole } from "./helpers/check.mjs";
 import {
 	vscode,
 	shim,
@@ -12,6 +13,8 @@ import {
 	userText,
 	textMsg,
 	assistantText,
+	assistantToolCallMsg,
+	toolResultMsg,
 	userImageMsg,
 	jsonResponse,
 	onFetch,
@@ -100,6 +103,31 @@ async function main() {
 		);
 		checkMatch("oversized body throws", t.error?.message, /48 MiB limit/);
 		checkMatch("toast says fewer/smaller images", shim.calls.showErrorMessage.at(-1)?.message, /Attach fewer or smaller images/);
+		provider.dispose();
+	}
+	// --- 128-tool cap (issue #27): trim instead of failing, warn once ---
+	{
+		shim.reset();
+		const { provider, output } = makeProvider();
+		const tools = Array.from({ length: 130 }, (_, i) => ({ name: `t_${i}`, description: "", inputSchema: { type: "object", properties: {} } }));
+		// The history already called the LAST tool — a plain first-128 cut would drop it.
+		const messages = [
+			userText("go"),
+			assistantToolCallMsg("", [{ callId: "c1", name: "t_129", input: {} }]),
+			toolResultMsg([{ callId: "c1", content: [new vscode.LanguageModelTextPart("done")] }]),
+		];
+		const turn = () =>
+			runTurn(provider, { model: model("deepseek-v4-flash"), messages, options: { tools }, chunks: ok({ prompt_tokens: 10, completion_tokens: 1 }) });
+		const t = await turn();
+		check("130 tools: the request is sent, not failed", t.error, undefined);
+		const sent = JSON.parse(t.captured.body).tools.map((d) => d.function.name);
+		check("128 tools on the wire", sent.length, 128);
+		checkDeep("host order kept, the called tool kept past the cut", [sent[0], sent[126], sent[127]], ["t_0", "t_126", "t_129"]);
+		checkMatch("warning names the cap and the counts", shim.calls.showWarningMessage.at(-1)?.message, /at most 128 tools per request, but this chat offers 130, so 2 were left out/);
+		check("…with Show Log", shim.calls.showWarningMessage.at(-1)?.items.join(","), "Show Log");
+		checkMatch("dropped names are logged", output.text(), /request\.tools_capped .*"dropped":\["t_127","t_128"\]/);
+		await turn();
+		check("warning fires once per session", shim.calls.showWarningMessage.length, 1);
 		provider.dispose();
 	}
 	// --- API error mapping (non-retryable statuses) ---
