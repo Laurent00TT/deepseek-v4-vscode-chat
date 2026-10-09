@@ -1,10 +1,13 @@
 // Request assembly and post-usage behaviour of provideLanguageModelChatResponse:
 // headers/body, pre-flight guards (token overflow, 32 MiB image, 48 MiB body),
-// API error → notification mapping, and the usage pipeline (estimator EMA,
-// usage DataPart gating, cache-breakdown warning, context nudge hysteresis).
-import { check, checkMatch, summary, withConsole } from "./helpers/check.mjs";
+// the 128-tool cap, API error → notification mapping, and the usage pipeline
+// (estimator EMA, usage DataPart gating, cache-breakdown warning, context
+// nudge hysteresis).
+import { createRequire } from "node:module";
+import { check, checkDeep, checkMatch, summary, withConsole } from "./helpers/check.mjs";
 import {
 	vscode,
+	OUT,
 	shim,
 	makeProvider,
 	runTurn,
@@ -12,6 +15,8 @@ import {
 	userText,
 	textMsg,
 	assistantText,
+	assistantToolCallMsg,
+	toolResultMsg,
 	userImageMsg,
 	jsonResponse,
 	onFetch,
@@ -23,6 +28,8 @@ import {
 	fakeSecrets,
 } from "./helpers/fakes.mjs";
 
+const require = createRequire(import.meta.url);
+const { toWireName } = require(OUT("tool_names.js"));
 const Role = vscode.LanguageModelChatMessageRole;
 const ok = (usage) => [contentChunk("ok"), finishChunk("stop"), usageChunk(usage), DONE];
 
@@ -100,6 +107,38 @@ async function main() {
 		);
 		checkMatch("oversized body throws", t.error?.message, /48 MiB limit/);
 		checkMatch("toast says fewer/smaller images", shim.calls.showErrorMessage.at(-1)?.message, /Attach fewer or smaller images/);
+		provider.dispose();
+	}
+	// --- 128-tool cap (issue #27): trim instead of failing, warn once ---
+	{
+		shim.reset();
+		const { provider, output } = makeProvider();
+		// The LAST tool has an MCP-style name that is wire-aliased, and the
+		// history already called it: a plain first-128 cut would drop it, and
+		// keeping it only works if history and defs agree on the wire name.
+		const aliasHost = "mcp.server." + "long_".repeat(12) + "tool";
+		check("premise: the tail tool is aliased on the wire", toWireName(aliasHost) !== aliasHost, true);
+		const tools = Array.from({ length: 130 }, (_, i) => ({ name: i === 129 ? aliasHost : `t_${i}`, description: "", inputSchema: { type: "object", properties: {} } }));
+		const messages = [
+			userText("go"),
+			assistantToolCallMsg("", [{ callId: "c1", name: aliasHost, input: {} }]),
+			toolResultMsg([{ callId: "c1", content: [new vscode.LanguageModelTextPart("done")] }]),
+		];
+		const turn = (offered) =>
+			runTurn(provider, { model: model("deepseek-v4-flash"), messages, options: { tools: offered }, chunks: ok({ prompt_tokens: 10, completion_tokens: 1 }) });
+		const atCap = await turn(tools.slice(0, 128));
+		check("exactly 128 tools: sent untouched", JSON.parse(atCap.captured.body).tools.length, 128);
+		check("…with no warning", shim.calls.showWarningMessage.length, 0);
+		const t = await turn(tools);
+		check("130 tools: the request is sent, not failed", t.error, undefined);
+		const sent = JSON.parse(t.captured.body).tools.map((d) => d.function.name);
+		check("128 tools on the wire", sent.length, 128);
+		checkDeep("host order kept, the called (aliased) tool kept past the cut", [sent[0], sent[126], sent[127]], ["t_0", "t_126", toWireName(aliasHost)]);
+		checkMatch("warning names the counts", shim.calls.showWarningMessage.at(-1)?.message, /offers 130 tools, but DeepSeek V4 sends at most 128 per request, so 2 were left out/);
+		check("…with Show Log", shim.calls.showWarningMessage.at(-1)?.items.join(","), "Show Log");
+		checkMatch("dropped names are logged", output.text(), /request\.tools_capped .*"dropped":\["t_127","t_128"\]/);
+		await turn(tools);
+		check("warning fires once per session", shim.calls.showWarningMessage.length, 1);
 		provider.dispose();
 	}
 	// --- API error mapping (non-retryable statuses) ---

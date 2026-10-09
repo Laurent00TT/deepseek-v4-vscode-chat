@@ -96,6 +96,9 @@ Your conversation's cached prefix on DeepSeek's side broke, so further turns bil
 **Copilot's context indicator shows 0 / 0%.**
 Update to VS Code **1.120+** — earlier hosts don't display usage for extension-provided models ([#18](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/18), [microsoft/vscode#315394](https://github.com/microsoft/vscode/issues/315394)).
 
+**`Cannot have more than 128 tools per request` (shown as a 502 after 5 retries).**
+Older versions failed this way when a chat offered more than 128 tools ([#27](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/27)). The extension now sends at most 128 tools per request instead: when the chat offers more (built-in + MCP + extension tools), it keeps the tools the conversation already used, fills the rest in the order VS Code lists them, and warns once; *Show DeepSeek V4 Log* lists what was left out. To choose which tools DeepSeek gets, turn some off with **Configure Tools** in the chat input.
+
 **My image attachment is ignored.**
 Only the Flash Vision variants send images. Check the format and the 48 MiB / 32 MiB limits above.
 

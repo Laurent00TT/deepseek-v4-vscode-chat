@@ -98,6 +98,9 @@
 **Copilot 上下文指示器显示 0 / 0%。**
 升级到 VS Code **1.120+** —— 更早的宿主不会为扩展提供的模型显示用量（[#18](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/18)、[microsoft/vscode#315394](https://github.com/microsoft/vscode/issues/315394)）。
 
+**报错 `Cannot have more than 128 tools per request`（重试 5 次后显示为 502）。**
+旧版本在聊天提供的工具超过 128 个时会这样报错（[#27](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/27)）。现在扩展每次请求最多发送 128 个工具，不再报错：当聊天提供的工具更多时（内置 + MCP + 扩展工具），会优先保留对话中已经用过的工具，其余按 VS Code 列出的顺序补满，并提示一次；*Show DeepSeek V4 Log* 会列出被省略的工具。想自己决定让 DeepSeek 用哪些工具，可在聊天输入框的 **Configure Tools** 中关掉一部分。
+
 **我附加的图片被忽略了。**
 只有 Flash Vision 变体会发送图片。检查格式和上文的 48 MiB / 32 MiB 限制。
 

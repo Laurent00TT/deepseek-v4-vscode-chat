@@ -13,7 +13,7 @@ async function main() {
 		checkDeep("six entries in catalog order", infos.map((i) => i.id), IDS);
 		check("family frozen", infos.every((i) => i.family === "deepseek-v4"), true);
 		check("version frozen", infos.every((i) => i.version === "1.0.0"), true);
-		check("toolCalling on all", infos.every((i) => i.capabilities.toolCalling === true), true);
+		check("toolCalling declares the 128-tool cap on all", infos.every((i) => i.capabilities.toolCalling === 128), true);
 		checkDeep("imageInput only on vision", infos.filter((i) => i.capabilities.imageInput).map((i) => i.id), ["deepseek-v4-flash-vision-exp::thinking", "deepseek-v4-flash-vision-exp"]);
 		check("no warning icon with a key", infos.every((i) => i.statusIcon === undefined && i.detail === undefined), true);
 		check("tooltip is the variant copy", infos[0].tooltip, "DeepSeek V4 Pro — strongest, extended thinking");

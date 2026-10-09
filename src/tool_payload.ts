@@ -4,7 +4,7 @@
  * collision/unusable skips (issue #20), and tool_choice resolution.
  *
  * Extracted from `convertTools` in utils.ts — which remains as a thin vscode
- * adapter (enum → boolean) — so the REAL skip-then-count path is importable
+ * adapter (enum → boolean) — so the REAL skip-then-cap path is importable
  * by the Node unit harness (test/unit_tool_limit.mjs) without a vscode mock.
  * Third instance of the repo's vscode-free extraction pattern
  * (tool_names.ts, tool_choice.ts).
@@ -173,6 +173,7 @@ export function buildToolPayload(
 	const wireToHost = buildWireNameMap(tools.map((t) => t?.name));
 
 	const toolDefs: OpenAIFunctionToolDef[] = [];
+	const advertisedWires = new Set<string>();
 	for (const t of tools) {
 		if (!t || typeof t !== "object") {
 			continue;
@@ -196,6 +197,14 @@ export function buildToolPayload(
 			});
 			continue;
 		}
+		// An identical host name listed twice passes the check above (it maps
+		// to itself) but would put a duplicate function on the wire — the API
+		// requires unique tool names — and take a second slot under the
+		// 128-tool cap. Same tool either way, so first wins, silently.
+		if (advertisedWires.has(wire)) {
+			continue;
+		}
+		advertisedWires.add(wire);
 		const description = typeof t.description === "string" ? t.description : "";
 		const params = sanitizeSchema(t.inputSchema ?? { type: "object", properties: {} });
 		toolDefs.push({
