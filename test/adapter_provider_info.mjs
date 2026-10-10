@@ -1,8 +1,8 @@
 // Picker entries, token counting, and the secret-change reaction.
 import { check, checkDeep, summary, until } from "./helpers/check.mjs";
-import { vscode, shim, makeProvider, fakeSecrets, cancellation, userText } from "./helpers/fakes.mjs";
+import { vscode, shim, makeProvider, fakeSecrets, cancellation, userText, model } from "./helpers/fakes.mjs";
 
-const IDS = ["deepseek-v4-pro::thinking", "deepseek-v4-pro", "deepseek-v4-flash::thinking", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp::thinking", "deepseek-v4-flash-vision-exp"];
+const IDS = ["deepseek-v4-pro::thinking", "deepseek-v4-pro", "deepseek-v4-flash::thinking", "deepseek-v4-flash"];
 
 async function main() {
 	// --- with a key ---
@@ -10,11 +10,11 @@ async function main() {
 		shim.reset();
 		const { provider } = makeProvider();
 		const infos = await provider.provideLanguageModelChatInformation({ silent: true }, cancellation().token);
-		checkDeep("six entries in catalog order", infos.map((i) => i.id), IDS);
+		checkDeep("four entries in catalog order", infos.map((i) => i.id), IDS);
 		check("family frozen", infos.every((i) => i.family === "deepseek-v4"), true);
 		check("version frozen", infos.every((i) => i.version === "1.0.0"), true);
 		check("toolCalling declares the 128-tool cap on all", infos.every((i) => i.capabilities.toolCalling === 128), true);
-		checkDeep("imageInput only on vision", infos.filter((i) => i.capabilities.imageInput).map((i) => i.id), ["deepseek-v4-flash-vision-exp::thinking", "deepseek-v4-flash-vision-exp"]);
+		checkDeep("imageInput only on Flash (V4.1, native vision)", infos.filter((i) => i.capabilities.imageInput).map((i) => i.id), ["deepseek-v4-flash::thinking", "deepseek-v4-flash"]);
 		check("no warning icon with a key", infos.every((i) => i.statusIcon === undefined && i.detail === undefined), true);
 		check("tooltip is the variant copy", infos[0].tooltip, "DeepSeek V4 Pro — strongest, extended thinking");
 		check("budgets propagate", infos[0].maxInputTokens === 655360 && infos[0].maxOutputTokens === 393216, true);
@@ -26,7 +26,7 @@ async function main() {
 		shim.reset();
 		const { provider } = makeProvider({ secrets: fakeSecrets({}) });
 		const infos = await provider.prepareLanguageModelChatInformation({ silent: true }, cancellation().token);
-		check("still six entries (discoverable)", infos.length, 6);
+		check("still four entries (discoverable)", infos.length, 4);
 		check("warning icon", infos.every((i) => i.statusIcon instanceof vscode.ThemeIcon && i.statusIcon.id === "warning"), true);
 		check("detail points at the Manage command", infos.every((i) => /Manage DeepSeek V4 Provider/.test(i.detail)), true);
 		check("no input box during silent discovery", shim.calls.showInputBox.length, 0);
@@ -37,8 +37,12 @@ async function main() {
 		shim.reset();
 		const { provider } = makeProvider();
 		check("string: ceil(len / 3.0)", await provider.provideTokenCount({}, "abcdefg", cancellation().token), 3);
-		const msg = { role: vscode.LanguageModelChatMessageRole.User, content: [new vscode.LanguageModelTextPart("abcdefghi"), new vscode.LanguageModelDataPart(new Uint8Array(10), "image/png")] };
-		check("message: text estimate + 384 per image", await provider.provideTokenCount({}, msg, cancellation().token), 3 + 384);
+		const imageMsg = (mime) => ({ role: vscode.LanguageModelChatMessageRole.User, content: [new vscode.LanguageModelTextPart("abcdefghi"), new vscode.LanguageModelDataPart(new Uint8Array(10), mime)] });
+		const count = (m, msg) => provider.provideTokenCount(m, msg, cancellation().token);
+		check("Flash: text estimate + 1024 per image", await count(model("deepseek-v4-flash"), imageMsg("image/png")), 3 + 1024);
+		check("Pro: the image is dropped on the wire, so not counted", await count(model("deepseek-v4-pro::thinking"), imageMsg("image/png")), 3);
+		check("Flash: an unsupported format is dropped, so not counted", await count(model("deepseek-v4-flash"), imageMsg("image/bmp")), 3);
+		check("unresolvable model id: conservative count", await count({}, imageMsg("image/png")), 3 + 1024);
 		provider.dispose();
 	}
 	// --- secret change → picker refresh + session reset + silent balance refresh ---

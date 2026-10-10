@@ -1,6 +1,8 @@
 /**
  * Pure (vscode-free) assembly of multimodal user-message content for the
- * DeepSeek Vision API (deepseek-v4-flash-vision-exp).
+ * DeepSeek Vision API (`deepseek-flash`, i.e. V4.1 Flash — image input is
+ * native to the model; the 0.4.0 `deepseek-v4-flash-vision-exp` preview is
+ * retired).
  *
  * The Vision endpoint keeps the OpenAI-compatible /chat/completions shape but
  * switches `content` from a plain string to an array of typed blocks:
@@ -30,11 +32,14 @@ export const SUPPORTED_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * DeepSeek bills each image at up to 384 tokens. We use the ceiling as the
- * local estimate: the pre-flight overflow check must never under-count, and
- * at 384 tokens/image the overshoot is negligible against a 1M window.
+ * DeepSeek bills each image at up to 1024 tokens: V4.1 Flash downscales
+ * anything larger than roughly 1300×1300 total pixels, so typical
+ * screenshots sit at the cap (the retired Vision Exp preview capped at
+ * 384). We use the ceiling as the local estimate: the pre-flight overflow
+ * check must never under-count, and at 1024 tokens/image the overshoot is
+ * negligible against a 1M window.
  */
-export const IMAGE_TOKENS_PER_IMAGE = 384;
+export const IMAGE_TOKENS_PER_IMAGE = 1024;
 
 /**
  * The Vision API caps the request body at 48 MiB — base64-encoded image
@@ -49,7 +54,8 @@ export const MAX_REQUEST_BODY_BYTES = 48 * 1024 * 1024;
  * Compared against the RAW attachment bytes (the lenient reading; if the
  * server measures the encoded form a borderline image still gets the server
  * error — no worse than before the check). Verified against
- * https://api-docs.deepseek.com/guides/vision on 2026-08-22.
+ * https://api-docs.deepseek.com/guides/vision on 2026-08-22, unchanged for
+ * V4.1 Flash on 2026-10-10.
  */
 export const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 

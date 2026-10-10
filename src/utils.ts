@@ -82,12 +82,12 @@ export function convertMessages(
 			const built = buildUserContent(contentInputs, imageInput);
 			if (built.droppedNoVision > 0) {
 				console.warn(
-					`[DeepSeek V4] dropped ${built.droppedNoVision} image attachment(s): the selected model variant has no image input. Pick a Vision variant to send images.`
+					`[DeepSeek V4] dropped ${built.droppedNoVision} image attachment(s): the selected model variant has no image input. Pick a DeepSeek V4.1 Flash variant to send images.`
 				);
 			}
 			if (built.droppedUnsupported > 0) {
 				console.warn(
-					`[DeepSeek V4] dropped ${built.droppedUnsupported} image attachment(s) with unsupported MIME type (Vision accepts JPEG/PNG/GIF/WebP).`
+					`[DeepSeek V4] dropped ${built.droppedUnsupported} image attachment(s) with unsupported MIME type (DeepSeek accepts JPEG/PNG/GIF/WebP).`
 				);
 			}
 			if (built.content.length > 0) {

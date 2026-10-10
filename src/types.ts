@@ -108,7 +108,7 @@ export interface DeepSeekModelVariant {
 	id: string;
 	displayName: string;
 	tooltip: string;
-	apiModel: "deepseek-v4-pro" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp";
+	apiModel: "deepseek-v4-pro" | "deepseek-flash";
 	thinking: boolean;
 	/**
 	 * Whether the variant accepts image input (multimodal). Drives the

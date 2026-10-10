@@ -1,5 +1,5 @@
 // Tests for the pure multimodal content assembly in image_content.ts —
-// the Vision (deepseek-v4-flash-vision-exp) wire format:
+// the image-input wire format (deepseek-flash, i.e. V4.1 Flash):
 //
 //   - MIME normalization + the supported-format gate (JPEG/PNG/GIF/WebP)
 //   - base64 `data:` URL encoding for image_url blocks
@@ -51,7 +51,7 @@ const img = (mimeType, data = HELLO) => ({ kind: "image", mimeType, data });
 const txt = (text) => ({ kind: "text", text });
 
 // === 1. Constants pinned to the DeepSeek Vision API contract ===
-check("IMAGE_TOKENS_PER_IMAGE is 384", IMAGE_TOKENS_PER_IMAGE, 384);
+check("IMAGE_TOKENS_PER_IMAGE is 1024", IMAGE_TOKENS_PER_IMAGE, 1024);
 check("MAX_REQUEST_BODY_BYTES is 48 MiB", MAX_REQUEST_BODY_BYTES, 48 * 1024 * 1024);
 check("MAX_IMAGE_BYTES is 32 MiB", MAX_IMAGE_BYTES, 32 * 1024 * 1024);
 check("per-image cap is below the body cap", MAX_IMAGE_BYTES < MAX_REQUEST_BODY_BYTES, true);

@@ -61,12 +61,14 @@ function seededProvider() {
 }
 // === Golden 2: non-thinking, no tools (Flash), reasoning must NOT appear ===
 {
-	const messages = convertMessages(HISTORY, { imageInput: false });
+	// imageInput: true as the provider passes it for Flash — a text-only
+	// history must serialize exactly as it did before Flash took images.
+	const messages = convertMessages(HISTORY, { imageInput: true });
 	// provider strips reasoning_content for non-thinking variants; nothing attached here.
-	const body = buildRequestBody({ apiModel: "deepseek-v4-flash", messages, thinking: false, reasoningEffort: "max", maxOutputTokens: 65536, modelOptions: { temperature: 0.2 }, tools: undefined, tool_choice: undefined });
+	const body = buildRequestBody({ apiModel: "deepseek-flash", messages, thinking: false, reasoningEffort: "max", maxOutputTokens: 65536, modelOptions: { temperature: 0.2 }, tools: undefined, tool_choice: undefined });
 	const actual = JSON.stringify(body);
 	const EXPECTED =
-		'{"model":"deepseek-v4-flash","messages":[' +
+		'{"model":"deepseek-flash","messages":[' +
 		'{"role":"system","content":"You are an expert AI programming assistant."},' +
 		'{"role":"user","content":"What\'s the weather in Tokyo?"},' +
 		'{"role":"assistant","tool_calls":[{"id":"call_00_abc","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\"Tokyo\\"}"}}]},' +
@@ -79,17 +81,17 @@ function seededProvider() {
 	check("golden 2 sanity: no reasoning_content", actual.includes("reasoning_content"), false);
 	check("golden 2 sanity: temperature honoured", actual.includes('"temperature":0.2'), true);
 }
-// === Golden 3: vision, image in the last user turn (Flash Vision thinking) ===
+// === Golden 3: vision, image in the last user turn (Flash thinking) ===
 {
 	const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 	const messages = convertMessages([...HISTORY.slice(0, 5), userImageMsg("What colour is this?", png)], { imageInput: true });
 	const provider = seededProvider();
 	provider.attachReasoningToHistory(messages, true);
 	provider.dispose();
-	const body = buildRequestBody({ apiModel: "deepseek-v4-flash-vision-exp", messages, thinking: true, reasoningEffort: "high", maxOutputTokens: 393216, modelOptions: undefined, tools: undefined, tool_choice: undefined });
+	const body = buildRequestBody({ apiModel: "deepseek-flash", messages, thinking: true, reasoningEffort: "high", maxOutputTokens: 393216, modelOptions: undefined, tools: undefined, tool_choice: undefined });
 	const actual = JSON.stringify(body);
 	const EXPECTED =
-		'{"model":"deepseek-v4-flash-vision-exp","messages":[' +
+		'{"model":"deepseek-flash","messages":[' +
 		'{"role":"system","content":"You are an expert AI programming assistant."},' +
 		'{"role":"user","content":"What\'s the weather in Tokyo?"},' +
 		'{"role":"assistant","tool_calls":[{"id":"call_00_abc","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\"Tokyo\\"}"}}],"reasoning_content":"I should call get_weather for Tokyo."},' +

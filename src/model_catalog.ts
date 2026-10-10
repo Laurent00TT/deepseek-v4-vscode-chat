@@ -5,9 +5,10 @@
  * assembly (ThemeIcon, secrets gating) deliberately stays in provider.ts:
  * it is host-coupled and moving it would buy no testability.
  *
- * DeepSeek V4 supports 1M context and up to 384K output. Think Max requires
- * at least 384K of context allocated to the reasoning chain to avoid silent
- * truncation, so the thinking-max entry is configured generously.
+ * DeepSeek V4 Pro and V4.1 Flash support 1M context and up to 384K output.
+ * Think Max requires at least 384K of context allocated to the reasoning
+ * chain to avoid silent truncation, so the thinking entries are configured
+ * generously.
  *
  * Order matters — VS Code shows the first entry as default. The strongest
  * variant (pro + thinking-max) is intentionally listed first.
@@ -15,7 +16,7 @@
 
 import type { DeepSeekModelVariant } from "./types";
 
-// DS V4's context window is 1M (input + output total). V4's max output is
+// DS V4 / V4.1's context window is 1M (input + output total). Max output is
 // 384K (which subsumes the reasoning chain — `max_tokens` covers both the
 // hidden reasoning_content and the visible content). Thinking variants
 // budget the full 384K so max-effort reasoning chains can't be truncated.
@@ -50,45 +51,36 @@ export const MODEL_VARIANTS: DeepSeekModelVariant[] = [
 		maxInputTokens: 983040, // 960K (= 1M - 64K output)
 		maxOutputTokens: 65536, // 64K
 	},
+	// V4.1 Flash (released 2026-09-10) retired both V4 Flash and the V4 Flash
+	// Vision Exp preview. Its API name `deepseek-flash` carries no version:
+	// DeepSeek serves the latest Flash under it. The retired names
+	// `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` are only
+	// temporarily routed to V4.1 Flash (no end date published), so nothing
+	// here sends them any more.
+	//
+	// The picker ids keep their V4-era spelling on purpose — they are
+	// user-persisted (CONTRIBUTING red line #2), so renaming them would
+	// orphan every Flash user's picker selection.
+	//
+	// Image input is native (JPEG/PNG/GIF/WebP, sent as base64 data: URLs in
+	// content blocks — see image_content.ts), which made the two Vision Exp
+	// entries (0.4.0) the same model behind a second label; they were
+	// dropped rather than kept as duplicates.
 	{
 		id: "deepseek-v4-flash::thinking",
-		displayName: "DeepSeek V4 Flash (thinking)",
-		tooltip: "DeepSeek V4 Flash — cheapest with extended thinking",
-		apiModel: "deepseek-v4-flash",
-		thinking: true,
-		maxInputTokens: 655360, // 640K (= 1M - 384K output)
-		maxOutputTokens: 393216, // 384K
-	},
-	{
-		id: "deepseek-v4-flash",
-		displayName: "DeepSeek V4 Flash",
-		tooltip: "DeepSeek V4 Flash — cheapest, no extended thinking",
-		apiModel: "deepseek-v4-flash",
-		thinking: false,
-		maxInputTokens: 983040, // 960K (= 1M - 64K output)
-		maxOutputTokens: 65536, // 64K
-	},
-	// Vision Exp (released 2026-08-21): experimental multimodal variant of
-	// V4 Flash. Same 1M context / 384K output / dual thinking modes / tool
-	// calling as Flash, plus image input (JPEG/PNG/GIF/WebP, sent as base64
-	// data: URLs in content blocks — see image_content.ts). Billed at Flash
-	// prices; images tokenize at up to 384 tokens each. Listed after the
-	// text variants because it's experimental — users opt in via the picker.
-	{
-		id: "deepseek-v4-flash-vision-exp::thinking",
-		displayName: "DeepSeek V4 Flash Vision (thinking)",
-		tooltip: "DeepSeek V4 Flash Vision (experimental) — image input, extended thinking",
-		apiModel: "deepseek-v4-flash-vision-exp",
+		displayName: "DeepSeek V4.1 Flash (thinking)",
+		tooltip: "DeepSeek V4.1 Flash — cheapest with extended thinking, image input",
+		apiModel: "deepseek-flash",
 		thinking: true,
 		vision: true,
 		maxInputTokens: 655360, // 640K (= 1M - 384K output)
 		maxOutputTokens: 393216, // 384K
 	},
 	{
-		id: "deepseek-v4-flash-vision-exp",
-		displayName: "DeepSeek V4 Flash Vision",
-		tooltip: "DeepSeek V4 Flash Vision (experimental) — image input, no extended thinking",
-		apiModel: "deepseek-v4-flash-vision-exp",
+		id: "deepseek-v4-flash",
+		displayName: "DeepSeek V4.1 Flash",
+		tooltip: "DeepSeek V4.1 Flash — cheapest, image input, no extended thinking",
+		apiModel: "deepseek-flash",
 		thinking: false,
 		vision: true,
 		maxInputTokens: 983040, // 960K (= 1M - 64K output)
