@@ -298,14 +298,13 @@ async function main() {
 		process.exit(2);
 	}
 	if (turn1.toolCalls.length === 0) {
-		// Mirrors the extension's Required mode with a single tool (named force).
-		console.log("  model answered without a tool call under tool_choice=auto; retrying with a named force");
-		turn1 = await streamChat(
-			thinkingBody([USER_IMAGE_TURN], { tool_choice: { type: "function", function: { name: "record_color" } } }),
-			"turn1-forced",
-		);
+		// Thinking mode rejects a forced tool_choice ("required" or a named
+		// function → 400, verified 2026-10-11), so the only retry that keeps
+		// thinking on is another auto turn.
+		console.log("  model answered without a tool call under tool_choice=auto; retrying once");
+		turn1 = await streamChat(thinkingBody([USER_IMAGE_TURN]), "turn1-retry");
 		if (!turn1.ok || turn1.toolCalls.length === 0) {
-			console.error("FAIL: turn 1 produced no tool call even when forced. Vision + tools may not compose.");
+			console.error("FAIL: turn 1 produced no tool call in two auto attempts. Vision + tools may not compose.");
 			process.exit(2);
 		}
 	}
