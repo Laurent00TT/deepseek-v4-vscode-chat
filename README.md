@@ -30,7 +30,7 @@ You need VS Code 1.106+, the **GitHub Copilot Chat** extension signed in (this e
 
 ## What you get
 
-- Extended thinking with selectable depth (`high` / `max`), and the reasoning chain carried across multi-turn agent loops
+- Extended thinking with selectable depth (`low` / `high` / `max`), and the reasoning chain carried across multi-turn agent loops
 - Agent-mode tool calling across long multi-turn loops — tool results and the model's own reasoning are carried from turn to turn
 - Native image input on the Vision variants
 - Live account balance in the status bar (CNY / USD auto-detected); the hover adds session spend
@@ -70,7 +70,7 @@ Two things a generic OpenAI-compatible bridge cannot do for DeepSeek V4:
 
 | Setting | Values | Default | Description |
 | ------ | ------ | ------ | ------ |
-| `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | Reasoning depth for the `(thinking)` variants; ignored by the others. `high` is faster with shorter chains. Applies to the next message. |
+| `deepseekv4.reasoningEffort` | `low` \| `high` \| `max` | `max` | Reasoning depth for the `(thinking)` variants; ignored by the others. `high` is faster with shorter chains; `low` is the fastest and lightest. Applies to the next message. |
 | `deepseekv4.logRawReasoning` | `boolean` | `false` | Stream raw `reasoning_content` to the log (only useful when debugging cache breakdowns). May capture private code — keep **off** when sharing logs. |
 
 ## Billing & the Copilot premium-request quota

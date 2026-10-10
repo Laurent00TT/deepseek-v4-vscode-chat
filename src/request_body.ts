@@ -19,14 +19,17 @@
 import type { OpenAIChatMessage, OpenAIFunctionToolDef } from "./types";
 import type { ToolChoice } from "./tool_choice";
 
+/** The `deepseekv4.reasoningEffort` values, sent verbatim as `reasoning_effort`. */
+export type ReasoningEffort = "low" | "high" | "max";
+
 /**
  * Coerce the raw `deepseekv4.reasoningEffort` setting value. The settings UI
- * constrains it to "high" | "max", but a hand-edited settings.json could
- * contain anything — unknown values become "max" rather than being passed
- * through to the API.
+ * constrains it to "low" | "high" | "max", but a hand-edited settings.json
+ * could contain anything — unknown values become "max" rather than being
+ * passed through to the API.
  */
-export function coerceReasoningEffort(raw: string | undefined): "high" | "max" {
-	return raw === "high" ? "high" : "max";
+export function coerceReasoningEffort(raw: string | undefined): ReasoningEffort {
+	return raw === "low" || raw === "high" ? raw : "max";
 }
 
 export interface RequestBodyInputs {
@@ -37,7 +40,7 @@ export interface RequestBodyInputs {
 	/** Whether the selected variant runs in thinking mode. */
 	thinking: boolean;
 	/** Coerced effort — only sent when `thinking` is true. */
-	reasoningEffort: "high" | "max";
+	reasoningEffort: ReasoningEffort;
 	/** The variant's output ceiling; the host's max_tokens hint is capped to it. */
 	maxOutputTokens: number;
 	/** Raw host model options (max_tokens hint, temperature, stop, penalties). */

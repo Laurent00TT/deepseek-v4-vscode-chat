@@ -101,8 +101,8 @@ export interface ToolCallBuffer {
  *
  * `reasoning_effort` is no longer a per-variant constant — it is read at
  * request time from the user setting `deepseekv4.reasoningEffort` (values
- * `"high"` | `"max"`, default `"max"`). The setting only takes effect for
- * variants where `thinking === true`.
+ * `"low"` | `"high"` | `"max"`, default `"max"`). The setting only takes
+ * effect for variants where `thinking === true`.
  */
 export interface DeepSeekModelVariant {
 	id: string;

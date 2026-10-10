@@ -7,6 +7,7 @@
 //     npm test
 import { readFileSync } from "node:fs";
 import { check, checkDeep, summary } from "./helpers/check.mjs";
+import { coerceReasoningEffort } from "../out/request_body.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const extensionJs = readFileSync(new URL("../out/extension.js", import.meta.url), "utf8");
@@ -48,8 +49,15 @@ for (const id of [...pkg.contributes.commands.map((c) => c.command), "deepseekv4
 // --- settings ---
 const props = pkg.contributes.configuration.properties;
 checkDeep("settings keys", Object.keys(props).sort(), ["deepseekv4.logRawReasoning", "deepseekv4.reasoningEffort"]);
-checkDeep("reasoningEffort enum", props["deepseekv4.reasoningEffort"].enum, ["high", "max"]);
-check("reasoningEffort default", props["deepseekv4.reasoningEffort"].default, "max");
+const effort = props["deepseekv4.reasoningEffort"];
+checkDeep("reasoningEffort enum", effort.enum, ["low", "high", "max"]);
+check("reasoningEffort default", effort.default, "max");
+// VS Code pairs enumDescriptions with enum by index.
+check("reasoningEffort: one description per enum value", effort.enumDescriptions.length, effort.enum.length);
+// An enum value the coercion doesn't know would be sent as "max" without a word.
+for (const v of effort.enum) {
+	check(`reasoningEffort "${v}" survives coerceReasoningEffort`, coerceReasoningEffort(v), v);
+}
 check("logRawReasoning type", props["deepseekv4.logRawReasoning"].type, "boolean");
 check("logRawReasoning default", props["deepseekv4.logRawReasoning"].default, false);
 

@@ -37,6 +37,7 @@ function check(label, got, expected) {
 }
 
 // === 1. Effort coercion ===
+check("effort: low passes", coerceReasoningEffort("low"), "low");
 check("effort: high passes", coerceReasoningEffort("high"), "high");
 check("effort: max passes", coerceReasoningEffort("max"), "max");
 check("effort: unknown coerces to max", coerceReasoningEffort("extreme"), "max");
@@ -69,6 +70,21 @@ check(
 		'{"role":"user","content":"Thanks."}' +
 		'],"stream":true,"stream_options":{"include_usage":true},"max_tokens":393216,' +
 		'"thinking":{"type":"enabled"},"reasoning_effort":"max"}'
+);
+// `low` takes the same slot as high/max — only the value differs.
+const lowEffortBody = buildRequestBody({
+	apiModel: "deepseek-v4-pro",
+	messages: [{ role: "user", content: "Thanks." }],
+	thinking: true,
+	reasoningEffort: "low",
+	maxOutputTokens: 393216,
+});
+check(
+	"golden low-effort thinking body serializes byte-identically",
+	JSON.stringify(lowEffortBody),
+	'{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"Thanks."}],' +
+		'"stream":true,"stream_options":{"include_usage":true},"max_tokens":393216,' +
+		'"thinking":{"type":"enabled"},"reasoning_effort":"low"}'
 );
 
 // === 3. Golden: non-thinking request with tools, tool-call history, and the
