@@ -1,6 +1,7 @@
 // Request assembly and post-usage behaviour of provideLanguageModelChatResponse:
 // headers/body, pre-flight guards (token overflow, 32 MiB image, 48 MiB body),
-// the 128-tool cap, API error → notification mapping, and the usage pipeline
+// the 128-tool cap, Required tool mode on thinking variants (forced
+// tool_choice relaxed to "auto"), API error → notification mapping, and the usage pipeline
 // (estimator EMA, usage DataPart gating, cache-breakdown warning, context
 // nudge hysteresis).
 import { createRequire } from "node:module";
@@ -21,6 +22,8 @@ import {
 	jsonResponse,
 	onFetch,
 	contentChunk,
+	reasoningChunk,
+	toolCallChunk,
 	finishChunk,
 	usageChunk,
 	DONE,
@@ -30,6 +33,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const { toWireName } = require(OUT("tool_names.js"));
+const { fingerprintAssistantTurn } = require(OUT("reasoning_cache.js"));
 const Role = vscode.LanguageModelChatMessageRole;
 const ok = (usage) => [contentChunk("ok"), finishChunk("stop"), usageChunk(usage), DONE];
 
@@ -168,6 +172,42 @@ async function main() {
 		checkMatch("dropped names are logged", output.text(), /request\.tools_capped .*"dropped":\["t_127","t_128"\]/);
 		await turn(tools);
 		check("warning fires once per session", shim.calls.showWarningMessage.length, 1);
+		provider.dispose();
+	}
+	// --- Required tool mode on thinking variants: forced tool_choice relaxed to "auto" ---
+	// DeepSeek's thinking mode answers "required" and a named function with
+	// 400 "Thinking mode does not support this tool_choice"; non-thinking
+	// accepts both. Only the request that used to fail may change on the wire.
+	{
+		shim.reset();
+		const { provider, output } = makeProvider();
+		const { Auto, Required } = vscode.LanguageModelChatToolMode;
+		const tool = (name) => ({ name, description: "", inputSchema: { type: "object", properties: {} } });
+		const turn = (modelId, tools, toolMode, chunks = ok({ prompt_tokens: 10, completion_tokens: 1 })) =>
+			runTurn(provider, { model: model(modelId), messages: [userText("go")], options: { tools, toolMode }, chunks });
+		const sentChoice = (t) => JSON.parse(t.captured.body).tool_choice;
+		const relaxLogs = () => (output.text().match(/request\.tool_choice_relaxed/g) ?? []).length;
+
+		const auto = await turn("deepseek-v4-pro::thinking", [tool("a")], Auto);
+		check("thinking + Auto: 'auto'", sentChoice(auto), "auto");
+		check("…nothing logged", relaxLogs(), 0);
+		const one = await turn("deepseek-v4-pro::thinking", [tool("a")], Required);
+		check("thinking + Required + 1 tool: sent, not failed", one.error, undefined);
+		check("…named force relaxed to 'auto'", sentChoice(one), "auto");
+		check("…byte-identical to the same request in Auto mode", one.captured.body, auto.captured.body);
+		checkMatch("…logged with what was asked for", output.text(), /request\.tool_choice_relaxed .*"variant":"deepseek-v4-pro::thinking","requested":\{"type":"function","function":\{"name":"a"\}\},"sent":"auto"/);
+		const several = await turn("deepseek-v4-flash::thinking", [tool("a"), tool("b")], Required);
+		check("thinking + Required + 2 tools: 'required' relaxed to 'auto'", sentChoice(several), "auto");
+		check("…logged once per session", relaxLogs(), 1);
+		// Still a thinking turn: its reasoning is cached for the next request
+		// like any other — the reason to relax tool_choice, not disable thinking.
+		const called = await turn("deepseek-v4-pro::thinking", [tool("a")], Required, [reasoningChunk("Call a."), toolCallChunk(0, { id: "call_r", name: "a", args: "{}" }), finishChunk("tool_calls"), DONE]);
+		check("…the model's tool call reaches the host", called.progress.toolCalls()[0]?.name, "a");
+		check("…and its reasoning is cached for the next turn", provider._reasoningCache.get(fingerprintAssistantTurn({ text: "", toolCalls: [{ id: "call_r", name: "a" }] }), false), "Call a.");
+		// Non-thinking accepts a forced choice: untouched.
+		checkDeep("non-thinking + Required + 1 tool: named force kept", sentChoice(await turn("deepseek-v4-pro", [tool("a")], Required)), { type: "function", function: { name: "a" } });
+		check("non-thinking + Required + 2 tools: 'required' kept", sentChoice(await turn("deepseek-v4-flash", [tool("a"), tool("b")], Required)), "required");
+		check("…and never logged as relaxed", relaxLogs(), 1);
 		provider.dispose();
 	}
 	// --- API error mapping (non-retryable statuses) ---

@@ -84,9 +84,12 @@ const history = convertMessages([
 checkDeep("history roles in order", history.map((m) => m.role), ["system", "user", "assistant", "tool", "assistant", "user"]);
 
 // --- convertTools ---
+// tool_choice here is the caller's intent. On a thinking variant the provider
+// relaxes a forced choice to "auto" before sending (adapter_provider_request).
 check("convertTools: no tools → {}", JSON.stringify(convertTools({})), "{}");
 check("convertTools: Auto → 'auto'", convertTools({ tools: [{ name: "a" }], toolMode: vscode.LanguageModelChatToolMode.Auto }).tool_choice, "auto");
 checkDeep("convertTools: Required + 1 tool → named", convertTools({ tools: [{ name: "a" }], toolMode: vscode.LanguageModelChatToolMode.Required }).tool_choice, { type: "function", function: { name: "a" } });
+check("convertTools: Required + 2 tools → 'required'", convertTools({ tools: [{ name: "a" }, { name: "b" }], toolMode: vscode.LanguageModelChatToolMode.Required }).tool_choice, "required");
 
 // --- validateRequest ---
 const emptyList = withConsole("error", () => { try { validateRequest([]); return false; } catch (e) { return /no messages/.test(e.message); } });

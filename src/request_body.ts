@@ -46,6 +46,8 @@ export interface RequestBodyInputs {
 	/** Raw host model options (max_tokens hint, temperature, stop, penalties). */
 	modelOptions?: Record<string, unknown>;
 	tools?: OpenAIFunctionToolDef[];
+	/** Sent as given. The caller fits it to `thinking` first
+	 * (`fitToolChoiceToThinking`): thinking mode rejects a forced choice. */
 	tool_choice?: ToolChoice;
 }
 

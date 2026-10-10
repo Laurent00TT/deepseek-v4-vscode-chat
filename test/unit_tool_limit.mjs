@@ -39,6 +39,7 @@ import process from "node:process";
 import { readFileSync } from "node:fs";
 import { MAX_TOOLS_PER_REQUEST, capAdvertisedTools } from "../out/tool_limit.js";
 import { buildToolPayload } from "../out/tool_payload.js";
+import { fitToolChoiceToThinking } from "../out/tool_choice.js";
 
 let passed = 0;
 let failed = 0;
@@ -157,7 +158,10 @@ check("over-cap ADVERTISED set is trimmed to 128", trimmed.tools.length, 128);
 check("…dropping the host's last tool", trimmed.dropped.join(","), "host_tool_128");
 // tool_choice is resolved before the cap; a multi-tool "required" stays
 // valid for the trimmed set (a named force only exists for exactly 1 tool).
+// On a thinking variant the provider then relaxes it to "auto" — thinking
+// mode rejects any forced choice (see unit_tool_choice) — valid for any set.
 check("Required mode over the cap resolves to the multi-tool literal", genuinelyOver.tool_choice, "required");
+check("…which a thinking variant relaxes to 'auto'", fitToolChoiceToThinking(genuinelyOver.tool_choice, true).tool_choice, "auto");
 // The all-unusable degenerate: buildToolPayload returns {} (no tools key),
 // and `undefined` passes the cap — a tool-less request is legal however
 // large the host list was. Deliberate; see CHANGELOG.

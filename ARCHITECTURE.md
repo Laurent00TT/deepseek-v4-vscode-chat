@@ -354,6 +354,8 @@ The `reasoning_effort` value is read at request time from the `deepseekv4.reason
 
 In thinking mode DeepSeek ignores `temperature`, `top_p`, `presence_penalty`, and `frequency_penalty`. We omit them from the request body to keep it clean (better prompt-cache hit rate).
 
+Thinking mode also rejects a forced `tool_choice`, so VS Code's Required tool mode is relaxed to `"auto"` on thinking variants — see the tool-choice note under "V4.1 Flash" below.
+
 ### Usage capture
 
 `stream_options: { include_usage: true }` makes DeepSeek emit a final chunk with:
@@ -484,9 +486,24 @@ Invariants, in decreasing order of importance:
   "enabled"`, `tool_choice: "required"` or a named function returns 400
   "Thinking mode does not support this tool_choice" on both `deepseek-flash`
   and `deepseek-v4-pro` (`auto` / `none` work; non-thinking accepts all
-  four). `resolveToolChoice` still sends those for VS Code's `Required`
-  tool mode, so such a request fails on a thinking variant — pre-existing
-  and model-independent, not addressed here.
+  four). VS Code's `Required` tool mode resolves to exactly those
+  (`resolveToolChoice`), so on a thinking variant the provider relaxes the
+  choice to `"auto"` (`fitToolChoiceToThinking`, `src/tool_choice.ts`) and
+  logs the first relaxation of a session as `request.tool_choice_relaxed`.
+  The model keeps the same tools and history but may answer without
+  calling one. Running the request with thinking off instead would honour
+  `Required`, but the request would leave the conversation's cached prefix
+  (the non-thinking path strips `reasoning_content`), the turn would have
+  no reasoning for later requests to re-attach (a miss on every one, which
+  also arms the cache-breakdown warning), and the model the user picked
+  would be swapped. Only the request that used to 400 changes on the wire:
+  it now serializes exactly like the same request in Auto mode.
+  `integration_tool_choice_thinking.mjs` re-checks the server rule.
+  Live-checked 2026-10-11: that script passes on both models (both still
+  called the tool under thinking + `auto`), and the compiled provider,
+  driven end-to-end under the vscode shim, sent `auto` for Required on Pro
+  and Flash thinking, left the non-thinking variants' forced choice alone,
+  and re-attached the relaxed turn's reasoning on the next request.
 
 #### Verified against the official docs (2026-08-22)
 
@@ -641,6 +658,7 @@ Files in `test/integration_*.mjs` hit the live DeepSeek API directly, **bypassin
 - `integration_cache_miss_fallback.mjs` — the `reasoning_content: ""` stub keeps a conversation alive after a cache miss
 - `integration_vision.mjs` — multimodal content blocks against `deepseek-flash`: generates a solid-red PNG locally and requires the model to *see* it, in both thinking and non-thinking modes
 - `integration_vision_multiturn.mjs` — the agent-mode interactions `integration_vision.mjs` leaves open: a three-turn Vision + tools + thinking round-trip with the history shapes the extension actually sends (block-array user turn, assistant tool_call + `reasoning_content`, tool result). Hard checks: the model tool-calls with the image's color and every history shape is accepted. Recorded (informational): whether the re-sent image prefix hits the server prompt cache (`usage.prompt_cache_hit_tokens` vs the prior prompt size — the fact that decides whether Files API `file_id` reuse is worth anything), whether Vision enforces the strict `reasoning_content` rule, and whether a `tool`-role message may carry an image block
+- `integration_tool_choice_thinking.mjs` — which `tool_choice` values each API model accepts with thinking on and off. Hard checks: every value the extension can send is accepted (`"auto"` in both modes; `"required"` and a named function with thinking off). Recorded (informational): whether thinking mode still rejects a forced choice — if it starts accepting one, the Required-mode relaxation in `fitToolChoiceToThinking` can be revisited — and whether the model still calls the tool under the relaxed `"auto"`
 
 Run locally:
 

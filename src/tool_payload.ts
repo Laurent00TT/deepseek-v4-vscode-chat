@@ -224,6 +224,9 @@ export function buildToolPayload(
 	// Resolution lives in `tool_choice.ts` (vscode-free, unit-tested).
 	// Count and name refer to the ADVERTISED (wire) tool set — a forced
 	// named-function tool_choice must match a name the API was given.
+	// This is the caller's intent: on a thinking variant the provider
+	// relaxes a forced choice to "auto" (`fitToolChoiceToThinking`), since
+	// thinking mode rejects one.
 	const tool_choice = resolveToolChoice(requiredMode, toolDefs.length, toolDefs[0]?.function.name);
 
 	return { tools: toolDefs, tool_choice };
