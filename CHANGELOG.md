@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-11
+
 ### Added
 
 - **`low` reasoning effort.** `deepseekv4.reasoningEffort` now offers `low` alongside `high` and `max`, for `(thinking)` variants on simple tasks where a long reasoning chain only adds latency and tokens. DeepSeek added the level to the V4 Pro and Flash thinking modes on 2026-08-13 (its guidance: `low` for simple tasks, `high` for everyday agent work, `max` for complex problems), and V4.1 Flash takes the same parameter. The default stays `max`, and requests at `high` or `max` serialize byte-identically — the golden request tests are unchanged. One behaviour change for hand-edited settings: a `"low"` typed into settings.json used to be coerced to `max` (it was outside the enum); it is now sent as `low`. The settings dropdown, the walkthrough step, both READMEs and ARCHITECTURE.md list the new value. `test/unit_request_body.mjs` pins the coercion and the `low` body bytes; `test/unit_manifest.mjs` pins the enum and now also checks that every enum value has a description and survives `coerceReasoningEffort` — an enum value the coercion doesn't know would otherwise be sent as `max` without a word; `test/adapter_provider_request.mjs` covers setting → wire → `[req]` log line.
