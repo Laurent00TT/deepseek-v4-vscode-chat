@@ -32,7 +32,7 @@ DeepSeek V4.1 Flash（[2026-09-10 发布](https://api-docs.deepseek.com/zh-cn/ne
 
 ## 你能得到什么
 
-- 扩展思考，深度可选（`high` / `max`），推理链跨多轮 Agent 循环保留
+- 扩展思考，深度可选（`low` / `high` / `max`），推理链跨多轮 Agent 循环保留
 - Agent 模式工具调用，长多轮循环照常工作 —— 工具结果和模型自己的推理逐轮带下去
 - V4.1 Flash 原生支持图片输入
 - 状态栏实时显示账户余额（自动识别 CNY / USD）；悬浮层另有本次会话花费
@@ -71,7 +71,7 @@ DeepSeek V4.1 Flash（[2026-09-10 发布](https://api-docs.deepseek.com/zh-cn/ne
 
 | 设置项 | 取值 | 默认 | 说明 |
 | ------ | ------ | ------ | ------ |
-| `deepseekv4.reasoningEffort` | `high` \| `max` | `max` | `(thinking)` 变体的推理深度，其他变体忽略。`high` 更快、推理链更短。下一条消息即生效。 |
+| `deepseekv4.reasoningEffort` | `low` \| `high` \| `max` | `max` | `(thinking)` 变体的推理深度，其他变体忽略。`high` 更快、推理链更短；`low` 最快、最轻量。下一条消息即生效。 |
 | `deepseekv4.logRawReasoning` | `boolean` | `false` | 把原始 `reasoning_content` 流式写入日志（只在排查缓存击穿时有用）。可能捕获私有代码 —— 分享日志时请保持**关闭**。 |
 
 ## 计费与 Copilot 高级请求配额

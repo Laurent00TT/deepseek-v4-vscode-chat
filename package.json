@@ -86,11 +86,13 @@
 				"deepseekv4.reasoningEffort": {
 					"type": "string",
 					"enum": [
+						"low",
 						"high",
 						"max"
 					],
 					"enumDescriptions": [
-						"Faster responses with shorter reasoning chains.",
+						"Lightest reasoning: fastest responses and the fewest reasoning tokens. Suited to simple tasks.",
+						"Shorter reasoning chains and faster responses than max. Suited to everyday chat and agent tasks.",
 						"Maximum reasoning depth; slower and uses more tokens."
 					],
 					"default": "max",
@@ -131,7 +133,7 @@
 					{
 						"id": "tuneReasoningEffort",
 						"title": "Tune reasoning effort (optional)",
-						"description": "Switch between `high` (faster, lighter) and `max` (default, deepest) for `(thinking)` variants. Effect is global and applies to the next message.\n[Open Reasoning Effort Setting](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)",
+						"description": "Choose `low` (fastest, lightest), `high` (in between) or `max` (default, deepest) for `(thinking)` variants. Effect is global and applies to the next message.\n[Open Reasoning Effort Setting](command:workbench.action.openSettings?%22deepseekv4.reasoningEffort%22)",
 						"media": {
 							"markdown": "resources/walkthrough/tune-effort.md"
 						}

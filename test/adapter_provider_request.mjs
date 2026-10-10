@@ -58,6 +58,17 @@ async function main() {
 		check("model id on the wire is the API name", String(t.captured.body).startsWith('{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hi"}]'), true);
 		provider.dispose();
 	}
+	// --- low effort: setting → wire → per-request log line ---
+	{
+		shim.reset();
+		shim.answers.getConfiguration = { deepseekv4: { reasoningEffort: "low" } };
+		const { provider, output } = makeProvider();
+		const t = await runTurn(provider, { messages: [userText("hi")], chunks: ok({ prompt_tokens: 10, completion_tokens: 1 }) });
+		check("low effort: no error", t.error, undefined);
+		check("low effort is sent as low, not coerced to max", String(t.captured.body).includes('"reasoning_effort":"low"'), true);
+		checkMatch("…and logged per request", output.text(), /\[req\] reasoning_effort=low \(variant=deepseek-v4-pro::thinking\)/);
+		provider.dispose();
+	}
 	// --- missing API key ---
 	{
 		shim.reset();
