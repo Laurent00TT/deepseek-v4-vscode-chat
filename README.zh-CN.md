@@ -1,8 +1,8 @@
 # DeepSeek V4 for Copilot Chat
 
-> 🌐 本文是英文 [README](./README.md) 的中文版，**以英文版为准**；协议细节见英文 [ARCHITECTURE](./ARCHITECTURE.md)。同步时间：2026-08-25。发现两版不一致欢迎提 issue。
+> 🌐 本文是英文 [README](./README.md) 的中文版，**以英文版为准**；协议细节见英文 [ARCHITECTURE](./ARCHITECTURE.md)。同步时间：2026-10-10。发现两版不一致欢迎提 issue。
 
-在 VS Code Copilot Chat 里把 DeepSeek V4（Pro / Flash / Flash Vision）当原生模型用 —— 扩展思考、Agent 模式工具调用、图片输入，以及状态栏里你真实的 DeepSeek 账单。
+在 VS Code Copilot Chat 里把 DeepSeek V4 Pro 和 V4.1 Flash 当原生模型用 —— 扩展思考、Agent 模式工具调用、图片输入，以及状态栏里你真实的 DeepSeek 账单。
 
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.106%2B-blue)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -23,31 +23,30 @@
 | ------ | ------ | :---: | :---: | ------ | ------ |
 | DeepSeek V4 Pro (thinking) | `deepseek-v4-pro` | ✓ | — | 640K | 384K |
 | DeepSeek V4 Pro | `deepseek-v4-pro` | — | — | 960K | 64K |
-| DeepSeek V4 Flash (thinking) | `deepseek-v4-flash` | ✓ | — | 640K | 384K |
-| DeepSeek V4 Flash | `deepseek-v4-flash` | — | — | 960K | 64K |
-| DeepSeek V4 Flash Vision (thinking) | `deepseek-v4-flash-vision-exp` | ✓ | ✓ | 640K | 384K |
-| DeepSeek V4 Flash Vision | `deepseek-v4-flash-vision-exp` | — | ✓ | 960K | 64K |
+| DeepSeek V4.1 Flash (thinking) | `deepseek-flash` | ✓ | ✓ | 640K | 384K |
+| DeepSeek V4.1 Flash | `deepseek-flash` | — | ✓ | 960K | 64K |
 
-**(thinking)** 变体会先在隐藏的思维链里推理再作答 —— 更慢、更费 token，但更擅长难题和 Agent 任务；不带后缀的变体直接作答。所有变体共享 DeepSeek V4 的 1M token 上下文（输入 + 输出）；thinking 变体为输出预留 384K，以免长推理链被截断。
+**(thinking)** 变体会先在隐藏的思维链里推理再作答 —— 更慢、更费 token，但更擅长难题和 Agent 任务；不带后缀的变体直接作答。所有变体共享 1M token 上下文（输入 + 输出）；thinking 变体为输出预留 384K，以免长推理链被截断。
+
+DeepSeek V4.1 Flash（[2026-09-10 发布](https://api-docs.deepseek.com/zh-cn/news/news260910/)）取代了 V4 Flash 和 V4 Flash Vision 预览版，原生支持图片。升级后已选中的 Flash 条目保持不变；如果你之前选的是 **Flash Vision** 条目，请改选 **DeepSeek V4.1 Flash**。
 
 ## 你能得到什么
 
 - 扩展思考，深度可选（`high` / `max`），推理链跨多轮 Agent 循环保留
 - Agent 模式工具调用，长多轮循环照常工作 —— 工具结果和模型自己的推理逐轮带下去
-- Vision 变体原生支持图片输入
+- V4.1 Flash 原生支持图片输入
 - 状态栏实时显示账户余额（自动识别 CNY / USD）；悬浮层另有本次会话花费
 - 上下文窗口用量接入 Copilot Chat 原生指示器（需 VS Code 1.120+）
 - 带处理建议的错误提示（400 / 401 / 402 / 422 / 429），临时故障自动重试
 - 首次运行演练（Walkthrough）；未设密钥时选择器条目显示警告而不是消失
 
-## 图片（Vision 变体）
+## 图片（V4.1 Flash）
 
-选一个 **Flash Vision** 变体，在 Copilot Chat 里附加图片即可；思考和工具调用与 Flash 完全一致。
+选一个 **DeepSeek V4.1 Flash** 变体，在 Copilot Chat 里附加图片即可；思考和工具调用照常工作。V4 Pro 只支持文本。
 
 - 格式：JPEG、PNG、GIF、WebP。其他附件 —— 以及发给纯文本变体的图片 —— 都会被丢弃，绝不会由其他模型转述。
 - 限制：每个请求 48 MiB（base64 计入）、单张图片 32 MiB，两者都在发送前本地检查。
-- 费用：每张图片最多 384 tokens，按 Flash 价格计费。
-- `-exp` 表示 DeepSeek 侧仍是实验性模型（[发布说明，2026-08-21](https://api-docs.deepseek.com/news/news260821/)），偶有毛边属正常。
+- 费用：每张图片最多 1024 tokens（大图会先缩小），按 Flash 价格计费。
 
 ## 为什么要原生 provider？
 
@@ -102,7 +101,7 @@
 旧版本在聊天提供的工具超过 128 个时会这样报错（[#27](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/27)）。现在扩展每次请求最多发送 128 个工具，不再报错：当聊天提供的工具更多时（内置 + MCP + 扩展工具），会优先保留对话中已经用过的工具，其余按 VS Code 列出的顺序补满，并提示一次；*Show DeepSeek V4 Log* 会列出被省略的工具。想自己决定让 DeepSeek 用哪些工具，可在聊天输入框的 **Configure Tools** 中关掉一部分。
 
 **我附加的图片被忽略了。**
-只有 Flash Vision 变体会发送图片。检查格式和上文的 48 MiB / 32 MiB 限制。
+只有 V4.1 Flash 变体会发送图片 —— V4 Pro 只支持文本。检查格式和上文的 48 MiB / 32 MiB 限制。
 
 **为什么不支持 OpenRouter / 自定义 base URL？**
 有意为之（[#4](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/4)）：OpenRouter 会改写 DeepSeek 的 thinking 协议（`reasoning_details` 而非 `reasoning_content`、不同的 thinking 开关、没有缓存命中计数）—— 恰好是本扩展依赖的东西。要走 OpenRouter，请改用专门的 provider，例如 [ostash/openrouter-chat-provider](https://github.com/ostash/openrouter-chat-provider)。

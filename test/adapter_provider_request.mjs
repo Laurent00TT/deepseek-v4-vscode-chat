@@ -78,13 +78,13 @@ async function main() {
 		check("…with Start New Chat / Show Log", shim.calls.showErrorMessage.at(-1)?.items.join(","), "Start New Chat,Show Log");
 		provider.dispose();
 	}
-	// --- 32 MiB per-image pre-check (vision variant) ---
+	// --- 32 MiB per-image pre-check (image-capable variant) ---
 	{
 		shim.reset();
 		const { provider } = makeProvider();
 		const big = new Uint8Array(32 * 1024 * 1024 + 1);
 		const t = await quiet(() =>
-			runTurn(provider, { model: model("deepseek-v4-flash-vision-exp"), messages: [userImageMsg("look", big)] })
+			runTurn(provider, { model: model("deepseek-v4-flash"), messages: [userImageMsg("look", big)] })
 		);
 		checkMatch("oversized image throws", t.error?.message, /32 MiB per-image limit/);
 		check("no request was sent", t.captured.url, undefined);
@@ -101,7 +101,7 @@ async function main() {
 		const img = new Uint8Array(16 * 1024 * 1024);
 		const t = await quiet(() =>
 			runTurn(provider, {
-				model: model("deepseek-v4-flash-vision-exp"),
+				model: model("deepseek-v4-flash"),
 				messages: [userImageMsg("a", img), userImageMsg("b", img), userImageMsg("c", img)],
 			})
 		);

@@ -28,7 +28,7 @@ You can flip between modes any time without changing the model.
 
 ## What it does NOT affect
 
-- Non-thinking variants (`DeepSeek V4 Pro`, `DeepSeek V4 Flash`) — the
+- Non-thinking variants (`DeepSeek V4 Pro`, `DeepSeek V4.1 Flash`) — the
   setting is ignored when thinking is disabled.
 - Reasoning content already cached from prior turns — those round-trip
   unchanged. Only the new request uses the new effort.

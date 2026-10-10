@@ -1,6 +1,6 @@
 # DeepSeek V4 for Copilot Chat
 
-Use DeepSeek V4 (Pro / Flash / Flash Vision) as a native model in VS Code Copilot Chat — extended thinking, agent-mode tool calling, image input, and your real DeepSeek bill in the status bar.
+Use DeepSeek V4 Pro and V4.1 Flash as native models in VS Code Copilot Chat — extended thinking, agent-mode tool calling, image input, and your real DeepSeek bill in the status bar.
 
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.106%2B-blue)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -21,31 +21,30 @@ You need VS Code 1.106+, the **GitHub Copilot Chat** extension signed in (this e
 | ------ | ------ | :---: | :---: | ------ | ------ |
 | DeepSeek V4 Pro (thinking) | `deepseek-v4-pro` | ✓ | — | 640K | 384K |
 | DeepSeek V4 Pro | `deepseek-v4-pro` | — | — | 960K | 64K |
-| DeepSeek V4 Flash (thinking) | `deepseek-v4-flash` | ✓ | — | 640K | 384K |
-| DeepSeek V4 Flash | `deepseek-v4-flash` | — | — | 960K | 64K |
-| DeepSeek V4 Flash Vision (thinking) | `deepseek-v4-flash-vision-exp` | ✓ | ✓ | 640K | 384K |
-| DeepSeek V4 Flash Vision | `deepseek-v4-flash-vision-exp` | — | ✓ | 960K | 64K |
+| DeepSeek V4.1 Flash (thinking) | `deepseek-flash` | ✓ | ✓ | 640K | 384K |
+| DeepSeek V4.1 Flash | `deepseek-flash` | — | ✓ | 960K | 64K |
 
-**(thinking)** variants reason in a hidden chain of thought before answering — slower and more tokens, but stronger on hard and agentic tasks; the plain variants answer directly. All variants share DeepSeek V4's 1M-token context (input + output); thinking variants reserve 384K for output so long reasoning chains are never truncated.
+**(thinking)** variants reason in a hidden chain of thought before answering — slower and more tokens, but stronger on hard and agentic tasks; the plain variants answer directly. All variants share a 1M-token context (input + output); thinking variants reserve 384K for output so long reasoning chains are never truncated.
+
+DeepSeek V4.1 Flash ([released 2026-09-10](https://api-docs.deepseek.com/news/news260910/)) replaced V4 Flash and the V4 Flash Vision preview, and reads images natively. Upgrading keeps a selected Flash entry selected; if you had a **Flash Vision** entry selected, pick **DeepSeek V4.1 Flash** instead.
 
 ## What you get
 
 - Extended thinking with selectable depth (`high` / `max`), and the reasoning chain carried across multi-turn agent loops
 - Agent-mode tool calling across long multi-turn loops — tool results and the model's own reasoning are carried from turn to turn
-- Native image input on the Vision variants
+- Native image input on V4.1 Flash
 - Live account balance in the status bar (CNY / USD auto-detected); the hover adds session spend
 - Context-window usage in Copilot Chat's native indicator (needs VS Code 1.120+)
 - Actionable error messages (400 / 401 / 402 / 422 / 429) and automatic retry on transient failures
 - A first-run walkthrough; without a key the picker entries show a warning instead of disappearing
 
-## Images (Vision variants)
+## Images (V4.1 Flash)
 
-Pick a **Flash Vision** variant and attach images in Copilot Chat; thinking and tool calling work exactly as on Flash.
+Pick a **DeepSeek V4.1 Flash** variant and attach images in Copilot Chat; thinking and tool calling work as usual. V4 Pro is text-only.
 
 - Formats: JPEG, PNG, GIF, WebP. Anything else — and any image sent to a text-only variant — is dropped, never paraphrased by another model.
 - Limits: 48 MiB per request (base64 counts) and 32 MiB per image, both checked locally before sending.
-- Cost: up to 384 tokens per image, billed at Flash prices.
-- `-exp` is experimental on DeepSeek's side ([release note, 2026-08-21](https://api-docs.deepseek.com/news/news260821/)); expect rough edges.
+- Cost: up to 1024 tokens per image (large images are downscaled first), billed at Flash prices.
 
 ## Why a native provider?
 
@@ -100,7 +99,7 @@ Update to VS Code **1.120+** — earlier hosts don't display usage for extension
 Older versions failed this way when a chat offered more than 128 tools ([#27](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/27)). The extension now sends at most 128 tools per request instead: when the chat offers more (built-in + MCP + extension tools), it keeps the tools the conversation already used, fills the rest in the order VS Code lists them, and warns once; *Show DeepSeek V4 Log* lists what was left out. To choose which tools DeepSeek gets, turn some off with **Configure Tools** in the chat input.
 
 **My image attachment is ignored.**
-Only the Flash Vision variants send images. Check the format and the 48 MiB / 32 MiB limits above.
+Only the V4.1 Flash variants send images — V4 Pro is text-only. Check the format and the 48 MiB / 32 MiB limits above.
 
 **No OpenRouter / custom base URL?**
 Deliberate ([#4](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/4)): OpenRouter reshapes DeepSeek's thinking protocol (`reasoning_details` instead of `reasoning_content`, a different thinking switch, no cache-hit accounting) — exactly what this extension depends on. For OpenRouter use a dedicated provider such as [ostash/openrouter-chat-provider](https://github.com/ostash/openrouter-chat-provider).

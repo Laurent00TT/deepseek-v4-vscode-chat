@@ -1,13 +1,13 @@
 // Standalone integration test that bypasses VS Code entirely.
 // Directly hits the DeepSeek API to validate the Vision (multimodal) wire
-// protocol used by this extension for deepseek-v4-flash-vision-exp. Run with:
+// protocol used by this extension for deepseek-flash (V4.1 Flash). Run with:
 //
 //     DEEPSEEK_API_KEY=sk-... node test/integration_vision.mjs
 //
 // What this test proves:
 //   1. The content-block shape we send ({type:"text"} + {type:"image_url",
 //      image_url:{url:"data:image/png;base64,..."}}) is accepted by
-//      /chat/completions for deepseek-v4-flash-vision-exp.
+//      /chat/completions for deepseek-flash.
 //   2. The model actually SEES the image (it names the color of a
 //      locally-generated solid-red PNG — no proxy description involved).
 //   3. The same multimodal request works in thinking mode and returns
@@ -24,7 +24,7 @@ if (!API_KEY) {
 }
 
 const BASE_URL = "https://api.deepseek.com/v1";
-const MODEL = "deepseek-v4-flash-vision-exp";
+const MODEL = "deepseek-flash";
 
 // --- Minimal PNG writer: 64x64 solid color, RGB8, no interlace. ---
 // Generated locally so the test has zero binary fixtures and the expected

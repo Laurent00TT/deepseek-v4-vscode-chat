@@ -42,8 +42,8 @@ body:
       options:
         - DeepSeek V4 Pro (thinking)
         - DeepSeek V4 Pro
-        - DeepSeek V4 Flash (thinking)
-        - DeepSeek V4 Flash
+        - DeepSeek V4.1 Flash (thinking)
+        - DeepSeek V4.1 Flash
         - Multiple / not relevant
     validations:
       required: true

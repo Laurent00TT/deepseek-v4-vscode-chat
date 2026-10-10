@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The Flash picker entries now run DeepSeek V4.1 Flash under its new API name, `deepseek-flash` ([#26](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/26)).** DeepSeek released V4.1 Flash on 2026-09-10 and retired both V4 Flash and the V4 Flash Vision Exp preview. The old names `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` still answer, but only through a redirect DeepSeek calls temporary and has published no end date for — so Flash users were already on V4.1 Flash under the old label, and every Flash entry would start failing the day the redirect is switched off. Both entries now send `model: "deepseek-flash"` and are labelled **DeepSeek V4.1 Flash (thinking)** / **DeepSeek V4.1 Flash**. Their picker ids (`deepseek-v4-flash::thinking`, `deepseek-v4-flash`) are deliberately unchanged (CONTRIBUTING red line #2), so a selected Flash entry stays selected across the upgrade. Budgets (1M context, 384K / 64K output), the thinking switch and `reasoning_effort` are unchanged; V4 Pro is untouched (DeepSeek reversed its announced 2026-09-14 redirect of `deepseek-v4-pro`).
+
+  This is a deliberate wire change: the `model` field of every Flash request changes, and nothing else does for text-only conversations — Golden 2 in `adapter_request_golden.mjs` now converts its text-only history with `imageInput: true`, as the provider does for Flash, to pin that. If DeepSeek's prompt cache keys on the requested model name rather than the model behind it, a conversation in flight across the upgrade takes one cache miss. The live integration scripts (`integration_vision.mjs`, `integration_vision_multiturn.mjs`, `integration_cache_miss_fallback.mjs`) now target `deepseek-flash` and pass against the live API, as do the reasoning round-trip scripts pointed at it (2026-10-10; results in ARCHITECTURE.md). `integration_vision_multiturn.mjs` no longer reads a partial prompt-cache hit as "image not cached": V4.1 Flash leaves the last ~2 cache blocks of a request unreused even on text-only turns.
+
+- **Image input moved onto the Flash entries.** V4.1 Flash reads images natively, so both Flash entries now declare `capabilities.imageInput` and send attachments as the same `image_url` content blocks the Vision entries used. V4 Pro stays text-only; images attached to it are still dropped, with a warning that now points to V4.1 Flash.
+
+- **Images are budgeted at 1024 tokens each (was 384).** V4.1 Flash downscales images to roughly 1300×1300 total pixels and bills at most 1024 tokens per image; the retired Vision preview capped at 384. Since DeepSeek moved the Vision name onto V4.1 Flash, the pre-flight overflow check, the context-usage estimate and `provideTokenCount` had been under-counting every screenshot by up to 640 tokens. `IMAGE_TOKENS_PER_IMAGE` is the ceiling again.
+
+- Docs: both READMEs, the walkthrough, the bug-report template and the Marketplace description list the four entries; ARCHITECTURE.md records the V4.1 Flash facts as verified against DeepSeek's docs on 2026-10-10.
+
+### Removed
+
+- **The two Flash Vision picker entries** (`deepseek-v4-flash-vision-exp::thinking`, `deepseek-v4-flash-vision-exp`, added in 0.4.0). Under V4.1 Flash they were the same model as the Flash entries behind a second label. If you had one selected, Copilot Chat no longer finds it — pick **DeepSeek V4.1 Flash** instead.
+
 ## [0.4.2] - 2026-10-10
 
 ### Fixed

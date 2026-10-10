@@ -74,7 +74,7 @@ check(
 // === 3. Golden: non-thinking request with tools, tool-call history, and the
 //        full modelOptions allow-list ===
 const toolBody = buildRequestBody({
-	apiModel: "deepseek-v4-flash",
+	apiModel: "deepseek-flash",
 	messages: [
 		{ role: "user", content: "Weather in Tokyo?" },
 		{
@@ -99,7 +99,7 @@ const toolBody = buildRequestBody({
 check(
 	"golden non-thinking body serializes byte-identically",
 	JSON.stringify(toolBody),
-	'{"model":"deepseek-v4-flash","messages":[' +
+	'{"model":"deepseek-flash","messages":[' +
 		'{"role":"user","content":"Weather in Tokyo?"},' +
 		'{"role":"assistant","tool_calls":[{"id":"call_abc123","type":"function","function":{"name":"get_weather","arguments":"{\\"location\\":\\"Tokyo\\"}"}}]},' +
 		'{"role":"tool","tool_call_id":"call_abc123","content":"Sunny, 22°C"}' +
@@ -112,7 +112,7 @@ check(
 
 // === 4. Golden: vision content blocks pass through untouched ===
 const visionBody = buildRequestBody({
-	apiModel: "deepseek-v4-flash-vision-exp",
+	apiModel: "deepseek-flash",
 	messages: [
 		{
 			role: "user",
@@ -129,7 +129,7 @@ const visionBody = buildRequestBody({
 check(
 	"golden vision body serializes byte-identically",
 	JSON.stringify(visionBody),
-	'{"model":"deepseek-v4-flash-vision-exp","messages":[' +
+	'{"model":"deepseek-flash","messages":[' +
 		'{"role":"user","content":[{"type":"text","text":"What color?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,SGVsbG8="}}]}' +
 		'],"stream":true,"stream_options":{"include_usage":true},"max_tokens":65536,' +
 		'"thinking":{"type":"disabled"},"temperature":0.7}'
@@ -137,7 +137,7 @@ check(
 
 // === 5. max_tokens clamp semantics ===
 const clampHigh = buildRequestBody({
-	apiModel: "deepseek-v4-flash",
+	apiModel: "deepseek-flash",
 	messages: [],
 	thinking: false,
 	reasoningEffort: "max",
@@ -146,7 +146,7 @@ const clampHigh = buildRequestBody({
 });
 check("max_tokens hint capped to the variant ceiling", clampHigh.max_tokens, 65536);
 const clampZero = buildRequestBody({
-	apiModel: "deepseek-v4-flash",
+	apiModel: "deepseek-flash",
 	messages: [],
 	thinking: false,
 	reasoningEffort: "max",

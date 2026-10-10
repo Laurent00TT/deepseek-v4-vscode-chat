@@ -1039,8 +1039,8 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 						// VS Code currently reads it only as a boolean; the request
 						// path still caps on its own (capAdvertisedTools).
 						toolCalling: MAX_TOOLS_PER_REQUEST,
-						// Vision variants accept image attachments; Copilot Chat only
-						// enables the attach-image UI when this is true.
+						// Image-capable variants (V4.1 Flash) accept image attachments;
+						// Copilot Chat only enables the attach-image UI when this is true.
 						imageInput: v.vision === true,
 					},
 					// @non-public LanguageModelChatInformation fields used by Copilot
@@ -1228,15 +1228,16 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// size.
 			const requestInputChars = messageChars + toolChars;
 			// Images bypass the char-based estimator: each is billed at up to
-			// 384 tokens regardless of byte size. Counted only for vision
-			// variants — everywhere else convertMessages drops them.
+			// 1024 tokens regardless of byte size. Counted only for
+			// image-capable variants — everywhere else convertMessages drops
+			// them.
 			const images = variant.vision === true ? this.imageStats(messages) : { count: 0, maxBytes: 0 };
 			// Per-image transport cap (separate from the 48 MiB body cap below):
 			// DeepSeek rejects a single inline image over 32 MiB. Fail here with
 			// an actionable message rather than after the whole body is built.
 			// A history image can only be over the cap if it was attached while
-			// a non-Vision variant was selected (dropped then, sent now) — hence
-			// the "start a new chat" escape hatch.
+			// a text-only variant (Pro) was selected (dropped then, sent now) —
+			// hence the "start a new chat" escape hatch.
 			if (images.maxBytes > MAX_IMAGE_BYTES) {
 				const sizeMiB = (images.maxBytes / (1024 * 1024)).toFixed(1);
 				this.log("request.image_too_large", { bytes: images.maxBytes, limit: MAX_IMAGE_BYTES });
@@ -1297,7 +1298,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			// Serialize once: reused for the size guard and the fetch body.
 			// DeepSeek caps the request body at 48 MiB, and base64 image
 			// payloads are what realistically get near it — the token
-			// pre-check can pass (images are ~384 tokens each) while the
+			// pre-check can pass (images are ≤ 1024 tokens each) while the
 			// encoded bytes blow the transport cap. Catch it locally with an
 			// actionable message instead of surfacing an opaque server 4xx.
 			const bodyJson = JSON.stringify(requestBody);
@@ -1511,10 +1512,10 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			if (part instanceof vscode.LanguageModelTextPart) {
 				total += this.estimateText(part.value);
 			} else {
-				// Image attachments bill at up to 384 tokens each on the Vision
-				// variants — budget them at the ceiling so the host's prompt
-				// planning never under-counts. Same structural detection as
-				// countImageParts.
+				// Image attachments bill at up to 1024 tokens each on the
+				// image-capable variants — budget them at the ceiling so the
+				// host's prompt planning never under-counts. Same structural
+				// detection as countImageParts.
 				const obj = part as { mimeType?: unknown; data?: unknown };
 				if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("image/") && obj.data instanceof Uint8Array) {
 					total += IMAGE_TOKENS_PER_IMAGE;

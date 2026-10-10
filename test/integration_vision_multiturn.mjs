@@ -5,7 +5,7 @@
 //
 // integration_vision.mjs proves the single-turn multimodal wire shape. This
 // test covers what it leaves open — the interactions the extension actually
-// performs in agent mode with a Vision variant selected. The request bodies
+// performs in agent mode with a Flash variant selected. The request bodies
 // mirror request_body.ts key-for-key (stream_options.include_usage, thinking
 // + reasoning_effort, tools + tool_choice) so the usage numbers below are
 // what the extension would see.
@@ -48,7 +48,7 @@ if (!API_KEY) {
 }
 
 const BASE_URL = "https://api.deepseek.com/v1";
-const MODEL = "deepseek-v4-flash-vision-exp";
+const MODEL = "deepseek-flash";
 // DeepSeek's prompt cache is built asynchronously after a request completes;
 // give it a moment before the follow-up so a "miss" means miss, not "too soon".
 const CACHE_SETTLE_MS = 2500;
@@ -279,7 +279,11 @@ function cacheVerdict(label, usage, priorPromptTokens) {
 	if (hit >= priorPromptTokens - CACHE_BLOCK_TOKENS) {
 		return `${label}: FULL prefix hit (hit=${hit} >= prior prompt ${priorPromptTokens} - ${CACHE_BLOCK_TOKENS}) — the image prefix IS cached`;
 	}
-	return `${label}: PARTIAL hit (hit=${hit} of prior prompt ${priorPromptTokens}) — text prefix cached, image apparently not`;
+	// Not evidence against the image: on V4.1 Flash the last ~2 blocks (~130–190
+	// tokens) of the previous request stay uncached even on text-only turns
+	// (measured 2026-10-10), which at this test's ~500-token scale is most of a
+	// turn's new content.
+	return `${label}: PARTIAL hit (hit=${hit} of prior prompt ${priorPromptTokens}) — inconclusive at this prompt size (uncached tail, not necessarily the image)`;
 }
 
 async function main() {
@@ -350,19 +354,19 @@ async function main() {
 	record.push(cacheVerdict("turn2 vs turn1", turn2.usage, turn1.usage?.prompt_tokens));
 
 	// === TURN 2 (NEGATIVE, informational): same history WITHOUT reasoning_content ===
-	console.log("\n=== TURN 2 (WITHOUT reasoning_content — informational): does Vision enforce the strict rule? ===");
+	console.log("\n=== TURN 2 (WITHOUT reasoning_content — informational): does the server enforce the strict rule? ===");
 	const assistantNoReasoning = { role: "assistant", content: assistantTurn1.content, tool_calls: assistantTurn1.tool_calls };
 	const turn2Neg = await streamChat(thinkingBody([USER_IMAGE_TURN, assistantNoReasoning, toolTurn]), "turn2-neg");
 	if (turn2Neg.ok) {
 		record.push(
-			"strict rule: Vision ACCEPTED a prior tool-call turn without reasoning_content (more lenient than Pro/Flash) — extension still attaches, no change needed",
+			"strict rule: the server ACCEPTED a prior tool-call turn without reasoning_content (lenient, as observed since 2026-08-22) — extension still attaches, no change needed",
 		);
 	} else if (/reasoning_content|thinking/i.test(turn2Neg.body || "")) {
 		record.push(
-			`strict rule: Vision REJECTED it (${turn2Neg.status}, mentions reasoning_content) — same rule as Pro/Flash; attachReasoningToHistory is load-bearing here too`,
+			`strict rule: the server REJECTED it (${turn2Neg.status}, mentions reasoning_content) — the documented rule is enforced again; attachReasoningToHistory is load-bearing`,
 		);
 	} else {
-		record.push(`strict rule: Vision rejected it with ${turn2Neg.status} for another reason: ${(turn2Neg.body || "").slice(0, 160)}`);
+		record.push(`strict rule: the server rejected it with ${turn2Neg.status} for another reason: ${(turn2Neg.body || "").slice(0, 160)}`);
 	}
 
 	// === TURN 3: follow-up text question over the full history ===

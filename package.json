@@ -2,7 +2,7 @@
 	"name": "deepseek-v4-vscode-chat",
 	"publisher": "Laurent00TT",
 	"displayName": "DeepSeek V4 Native Provider for Copilot Chat",
-	"description": "Use DeepSeek V4 (Pro / Flash / Flash Vision) with extended thinking and image input as a native model provider in GitHub Copilot Chat.",
+	"description": "Use DeepSeek V4 Pro and V4.1 Flash with extended thinking and image input as a native model provider in GitHub Copilot Chat.",
 	"version": "0.4.2",
 	"icon": "assets/icon.png",
 	"author": {

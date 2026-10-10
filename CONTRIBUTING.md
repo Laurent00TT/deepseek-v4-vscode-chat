@@ -92,7 +92,7 @@ before touching the literal.
 
 Manual pass in the Extension Development Host (F5) before a release:
 picker shows all variants, a thinking turn streams, an agent turn
-tool-calls across two rounds, a Vision variant sees an attached image.
+tool-calls across two rounds, a Flash variant sees an attached image.
 
 ## Release & revert notes
 

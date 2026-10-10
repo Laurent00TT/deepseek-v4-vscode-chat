@@ -25,7 +25,7 @@ if (!API_KEY) {
 }
 
 const BASE = "https://api.deepseek.com/v1";
-const MODEL = "deepseek-v4-flash"; // cheapest thinking-capable model
+const MODEL = "deepseek-flash"; // cheapest thinking-capable model (V4.1 Flash)
 
 const TOOLS = [
   {

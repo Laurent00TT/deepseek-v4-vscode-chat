@@ -14,7 +14,7 @@ VS Code LM API
 DeepSeekV4ChatModelProvider.provideLanguageModelChatResponse(model, messages, options, progress, token)
     │  → creates a fresh StreamContext (per-call state, see below)
     │
-    ├─ convertMessages(messages, {imageInput})  ← VS Code parts → OpenAI message[] (image data parts → image_url blocks on Vision variants, see "Multimodal image input")
+    ├─ convertMessages(messages, {imageInput})  ← VS Code parts → OpenAI message[] (image data parts → image_url blocks on image-capable variants, see "Multimodal image input")
     ├─ attachReasoningToHistory(out)     ← inject cached reasoning_content into prior assistant turns
     ├─ convertTools(options)             ← VS Code tools → OpenAI function tool defs (host names → wire aliases, see "Tool-name wire aliasing")
     │
@@ -365,11 +365,15 @@ Session cost is derived from `/user/balance` diff (`sessionSpend = startBalance 
 
 Per-turn **context-window** usage is reported to GitHub Copilot Chat's native context indicator via a `usage` `LanguageModelDataPart` on the response `progress` stream (see `provideLanguageModelChatResponse`). The host owns the conversation, so its native indicator is inherently per-conversation and follows the focused chat — a `LanguageModelChatProvider` gets no conversation id and no focus signal, so a custom status-bar percentage (the 0.3.6 surface) could only ever show "the last turn that ran" and swapped between conversations (#17). Only real turns drive it: `src/request_kind.ts` classifies each request by system-prompt prefix and we skip the small auxiliary requests Copilot routes through the model (chat-title, progress messages, todo tracking, git messages, …) so they can't reset the indicator. The status-bar **tooltip** still surfaces the DeepSeek-specific cache-hit rate (`prompt_cache_hit_tokens`), which Copilot's UI doesn't show; the status bar itself shows balance + session spend only.
 
-### Multimodal image input (Vision variants)
+### Multimodal image input (V4.1 Flash)
 
-The two `deepseek-v4-flash-vision-exp` variants (added 2026-08; DeepSeek's
-first multimodal model) declare `capabilities.imageInput`, so Copilot Chat
-enables image attachments for them. The wire changes exactly one thing:
+The two V4.1 Flash variants (`deepseek-flash`) declare
+`capabilities.imageInput`, so Copilot Chat enables image attachments for
+them. Image input is native to V4.1 Flash (2026-09-10); before that it was
+a separate preview model, `deepseek-v4-flash-vision-exp` (2026-08-21),
+with its own two picker entries — 0.4.0's Vision variants, dropped when
+both it and V4 Flash were retired into V4.1 Flash (see "V4.1 Flash" below).
+V4 Pro stays text-only. The wire changes exactly one thing:
 a **user** message that carries at least one image switches `content` from a
 plain string to the OpenAI-style block array
 
@@ -381,7 +385,7 @@ plain string to the OpenAI-style block array
 ```
 
 Everything else (endpoint, thinking mode, `reasoning_effort`, tools) is
-identical to Flash.
+identical to a text-only turn.
 
 Invariants, in decreasing order of importance:
 
@@ -402,19 +406,83 @@ Invariants, in decreasing order of importance:
 - MIME gate: JPEG/PNG/GIF/WebP (declared MIME, normalized —
   `image/jpg` → `image/jpeg`, parameters stripped). Unsupported images are
   dropped with a `console.warn`, never sent — one bad attachment must not
-  fail the whole request. On non-Vision variants every image is dropped
+  fail the whole request. On V4 Pro (text-only) every image is dropped
   (with a warn); there is deliberately no vision-proxy fallback.
-- Token budgeting: images bill at up to **384 tokens each**
-  (`IMAGE_TOKENS_PER_IMAGE`); counted into the pre-flight overflow check,
-  the context-usage estimate, and `provideTokenCount`, and subtracted
-  before the chars/token EMA calibration (images add prompt tokens without
-  adding chars, which would otherwise drag the ratio).
+- Token budgeting: images bill at up to **1024 tokens each**
+  (`IMAGE_TOKENS_PER_IMAGE`; 384 on the retired Vision preview); counted
+  into the pre-flight overflow check, the context-usage estimate, and
+  `provideTokenCount`, and subtracted before the chars/token EMA
+  calibration (images add prompt tokens without adding chars, which would
+  otherwise drag the ratio). The real cost is resolution-based, so an image
+  smaller than ~1300×1300 pixels costs less than the ceiling and that
+  turn's calibration sample reads slightly high; screenshots — the common
+  attachment — sit at the cap, and the EMA weight plus the [1, 6] clamp
+  bound the drift.
 - Transport cap: DeepSeek rejects request bodies over **48 MiB**
   (`MAX_REQUEST_BODY_BYTES`; base64 counts). The serialized body is
   checked once before fetch and an actionable error ("attach fewer/smaller
   images") replaces the opaque server 4xx. A single inline image is capped
   at **32 MiB** (`MAX_IMAGE_BYTES`, raw bytes): the largest user-turn
   attachment is checked before the body is built, same treatment.
+
+#### V4.1 Flash (verified against the official docs, 2026-10-10)
+
+`api-docs.deepseek.com` `/updates`, `/news/news260910`,
+`/quick_start/pricing`, `/quick_start/rate_limit`, `/guides/vision` and
+`/guides/thinking_mode` (EN and zh-cn):
+
+- 2026-09-10: DeepSeek-V4.1-Flash released as model id **`deepseek-flash`**
+  — unversioned, DeepSeek serves the latest Flash under it. V4 Flash and
+  V4 Flash Vision Exp are retired; the old ids `deepseek-v4-flash` /
+  `deepseek-v4-flash-vision-exp` are only *temporarily* routed to V4.1
+  Flash at Flash prices, with no end date. The catalog therefore sends
+  `deepseek-flash` from both Flash picker entries, which keep their V4-era
+  ids (CONTRIBUTING red line #2).
+- `deepseek-v4-pro` is unchanged (DeepSeek-V4-Pro-0813). The release note
+  announced a 2026-09-14 redirect of it to V4.1 Flash; the changelog
+  reversed that — V4 Pro keeps serving after 2026-09-14, billing
+  unchanged.
+- `deepseek-flash`: 1M context, 384K max output, thinking (default) and
+  non-thinking via the same `thinking.type` switch, `reasoning_effort`
+  `low` / `high` / `max` (server default `high`; the extension still
+  offers `high` / `max`), tool calls, JSON output, image input.
+- Images: same `image_url` block shape and limits as above (48 MiB body,
+  32 MiB per inline image, 600 per request, 8192 px per side / 4096 px
+  with ≥ 15 images). Token cost: images under ~544×544 pixels are
+  upscaled, larger ones downscaled to roughly 1300×1300 total pixels, so
+  each image costs at most **1024** tokens.
+- Concurrency: `deepseek-flash` 2500, `deepseek-v4-pro` 500 in-flight
+  requests per account.
+- Live-checked the same day: `GET /models` lists exactly `deepseek-flash`
+  (`DeepSeek-V4.1-Flash`, `context_window` 1048576, `max_output_tokens`
+  393216, input text + image, effort `low`/`high`/`max`) and
+  `deepseek-v4-pro` (text only, same limits) — the catalog budgets match
+  exactly. `integration_vision`, `integration_vision_multiturn`,
+  `integration_cache_miss_fallback` and the four reasoning round-trip
+  scripts pointed at `deepseek-flash` all pass, and the server is as
+  lenient about missing `reasoning_content` as on 2026-08-22. The compiled
+  provider was also driven end-to-end against the live API under the
+  vscode shim: both Flash entries with an image, Pro dropping one, and an
+  image + tool-call agent round-trip with reasoning re-attached.
+- Measured image cost (`prompt_tokens` with − without one PNG): 64×64 and
+  544×544 ≈ 184, 800×800 ≈ 422, 1920×1080 ≈ 968, 1300×1300 and
+  2000×2000 ≈ 994 — under the 1024 cap that `IMAGE_TOKENS_PER_IMAGE`
+  budgets.
+- Prompt cache: images are cached like text. Identical resends and
+  multi-turn continuations carrying a 1920×1080 screenshot reused the same
+  share as a text-only control, text placed after the image included, and
+  a new user message after a thinking + tool chain does not break reuse.
+  V4.1 Flash typically leaves the last ~2 blocks (~130–190 tokens) of the
+  previous request unreused (V4 Pro: 0–1 block) — at
+  `integration_vision_multiturn`'s ~500-token turns that tail is most of a
+  turn's new content, hence its PARTIAL verdicts.
+- Thinking mode rejects forced tool choice: with `thinking.type:
+  "enabled"`, `tool_choice: "required"` or a named function returns 400
+  "Thinking mode does not support this tool_choice" on both `deepseek-flash`
+  and `deepseek-v4-pro` (`auto` / `none` work; non-thinking accepts all
+  four). `resolveToolChoice` still sends those for VS Code's `Required`
+  tool mode, so such a request fails on a thinking variant — pre-existing
+  and model-independent, not addressed here.
 
 #### Verified against the official docs (2026-08-22)
 
@@ -424,7 +492,8 @@ Every vision fact above was originally taken from search summaries; on
 `/quick_start/pricing`, `/quick_start/rate_limit`, `/news/news260821`,
 EN and zh-cn trees). What the docs add beyond what the code already encodes:
 
-- Model id `deepseek-v4-flash-vision-exp` is the only id; thinking is a
+- (Retired 2026-09-10 — see "V4.1 Flash" above.) Model id
+  `deepseek-v4-flash-vision-exp` is the only id; thinking is a
   request parameter on it (`thinking.type`, `reasoning_effort`), not a
   separate model. 1M context / 384K max output, same as Flash; billed at
   Flash prices incl. time-of-day windows; "exp" = experimental, no
@@ -436,7 +505,8 @@ EN and zh-cn trees). What the docs add beyond what the code already encodes:
   request; 8192 px per side (4096 px when a request carries ≥ 15 images);
   external URLs ≤ 8192 chars. Per-image token cost is resolution-based
   (small images upscaled to ~384×384, large ones downscaled to ~800×800
-  pixels), capped at 384 — the ceiling we budget with.
+  pixels), capped at 384 — the ceiling we budgeted with until V4.1 Flash
+  raised it to 1024.
 - Files API exists and is free: `POST/GET/DELETE /files` (purpose
   `user_data`, 64 MiB per file, expiry 1 h–30 d or permanent), referenced
   from a user turn as `{ "type": "file", "file_id": "file-api-…" }`. Not
@@ -565,7 +635,7 @@ Files in `test/integration_*.mjs` hit the live DeepSeek API directly, **bypassin
 - `integration_tools_present.mjs` — **the strict rule with `tools` present** (the corner case this extension is built around; enforced as a 400 until mid-2026, accepted since 2026-08-22 — the script reports which way the server behaves today)
 - `integration_tools_advertised_no_tc.mjs` — reasoning rules when tools are advertised but the turn makes no tool call
 - `integration_cache_miss_fallback.mjs` — the `reasoning_content: ""` stub keeps a conversation alive after a cache miss
-- `integration_vision.mjs` — multimodal content blocks against `deepseek-v4-flash-vision-exp`: generates a solid-red PNG locally and requires the model to *see* it, in both thinking and non-thinking modes
+- `integration_vision.mjs` — multimodal content blocks against `deepseek-flash`: generates a solid-red PNG locally and requires the model to *see* it, in both thinking and non-thinking modes
 - `integration_vision_multiturn.mjs` — the agent-mode interactions `integration_vision.mjs` leaves open: a three-turn Vision + tools + thinking round-trip with the history shapes the extension actually sends (block-array user turn, assistant tool_call + `reasoning_content`, tool result). Hard checks: the model tool-calls with the image's color and every history shape is accepted. Recorded (informational): whether the re-sent image prefix hits the server prompt cache (`usage.prompt_cache_hit_tokens` vs the prior prompt size — the fact that decides whether Files API `file_id` reuse is worth anything), whether Vision enforces the strict `reasoning_content` rule, and whether a `tool`-role message may carry an image block
 
 Run locally:
