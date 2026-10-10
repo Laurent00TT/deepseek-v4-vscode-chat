@@ -1,6 +1,6 @@
 # DeepSeek V4 for Copilot Chat
 
-> 🌐 本文是英文 [README](./README.md) 的中文版，**以英文版为准**；协议细节见英文 [ARCHITECTURE](./ARCHITECTURE.md)。同步时间：2026-10-10。发现两版不一致欢迎提 issue。
+> 🌐 本文是英文 [README](./README.md) 的中文版，**以英文版为准**；协议细节见英文 [ARCHITECTURE](./ARCHITECTURE.md)。同步时间：2026-10-11。发现两版不一致欢迎提 issue。
 
 在 VS Code Copilot Chat 里把 DeepSeek V4 Pro 和 V4.1 Flash 当原生模型用 —— 扩展思考、Agent 模式工具调用、图片输入，以及状态栏里你真实的 DeepSeek 账单。
 
@@ -90,6 +90,9 @@ DeepSeek V4.1 Flash（[2026-09-10 发布](https://api-docs.deepseek.com/zh-cn/ne
 
 **报错 `The reasoning_content in the thinking mode must be passed back to the API`（400）。**
 2026-08-22 的一次实测之后没再见过（API 接受了所有不带推理的历史形态），但文档仍保留该规则。若出现，说明某个 assistant 轮在缓存里没有推理内容（安装扩展前的历史、缓存被清空、或超长会话中被淘汰）：新开会话即可；*Show DeepSeek V4 Reasoning Cache Stats* 可诊断。
+
+**报错 `Thinking mode does not support this tool_choice`（400）。**
+旧版本在 **(thinking)** 变体上，只要请求要求必须调用工具（VS Code 的 *Required* 工具模式）就会这样报错，错误提示还会误判为缺少推理链。DeepSeek 的 thinking 模式无法强制调用工具，所以扩展现在对这类请求不再强制：模型看到的工具不变，但可能不调用工具就直接回答。如果某项功能必须保证调用工具，请改用不带 (thinking) 的变体。
 
 **弹出警告 "prompt cache hit rate dropped"。**
 你这个会话在 DeepSeek 服务端的缓存前缀断了，后续轮次按全价（缓存未命中）输入价计费，而不是更便宜的缓存命中价。扩展无法判断具体原因 —— 某轮中途取消或失败、超长会话中被淘汰、编辑器重启都有可能。点 *Start New Chat* 新开会话即可止损；*Show Cache Stats* 可诊断。背景：[#19](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/19)。

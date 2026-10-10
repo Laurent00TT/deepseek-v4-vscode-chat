@@ -89,6 +89,9 @@ One exception comes from Copilot Chat itself: in **agent mode** it can spawn **s
 **`The reasoning_content in the thinking mode must be passed back to the API` (400).**
 Not seen since a 2026-08-22 live check (the API accepted every history shape without reasoning), but the docs still define the rule. If it appears, some assistant turn has no cached reasoning (pre-extension history, a cleared cache, or eviction in a very long session): start a new chat; *Show DeepSeek V4 Reasoning Cache Stats* diagnoses.
 
+**`Thinking mode does not support this tool_choice` (400).**
+Older versions failed this way on the **(thinking)** variants whenever a request required a tool call (VS Code's *Required* tool mode), and the error toast wrongly blamed a missing reasoning chain. DeepSeek's thinking mode cannot force a tool call, so the extension now sends such requests without forcing one: the model sees the same tools but may answer without calling one. If something needs a guaranteed tool call, pick a variant without (thinking).
+
 **"prompt cache hit rate dropped" warning.**
 Your conversation's cached prefix on DeepSeek's side broke, so further turns bill at the full (cache-miss) input price instead of the discounted cache-hit price. The extension cannot tell why — a turn cancelled or failed mid-stream, eviction in a very long session, or an editor restart are all possible. *Start New Chat* cuts losses; *Show Cache Stats* diagnoses. Background: [#19](https://github.com/Laurent00TT/deepseek-v4-vscode-chat/issues/19).
 

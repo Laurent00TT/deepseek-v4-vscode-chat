@@ -32,6 +32,7 @@ import { MODEL_VARIANTS, findVariant } from "./model_catalog";
 import { BASE_URL, BALANCE_URL, fetchWithRetry, formatApiError, type BalanceInfo } from "./api_client";
 import { toWireName, buildWireNameMap } from "./tool_names";
 import { MAX_TOOLS_PER_REQUEST, capAdvertisedTools } from "./tool_limit";
+import { fitToolChoiceToThinking } from "./tool_choice";
 import { ReasoningCache, fingerprintAssistantTurn, type CachedTurn, type ReasoningCacheStats } from "./reasoning_cache";
 import { shouldWarnCacheBreakdown } from "./cache_breakdown";
 import { ContextUsageService } from "./context_usage_service";
@@ -312,6 +313,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * same tool set, and every capped request is logged to the output
 	 * channel anyway. */
 	private _toolCapWarned = false;
+
+	/** Whether the "Required tool mode relaxed to auto on a thinking
+	 * variant" line has been logged. Once per session: it explains a fixed
+	 * policy, not something that varies per request. */
+	private _toolChoiceRelaxLogged = false;
 
 	/** Shared context-usage state. Written by `provideLanguageModelChatResponse`
 	 * (estimate before request, API values after), read by the status-bar
@@ -1232,6 +1238,24 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				}
 			}
 
+			// Thinking mode rejects a forced tool_choice with a 400, so on a
+			// thinking variant VS Code's Required tool mode is sent as "auto"
+			// (see tool_choice.ts for why this beats disabling thinking).
+			// Every other request passes through untouched.
+			const { tool_choice: sentToolChoice, relaxedFrom } = fitToolChoiceToThinking(
+				toolConfig.tool_choice,
+				variant.thinking
+			);
+			if (relaxedFrom !== undefined && !this._toolChoiceRelaxLogged) {
+				this._toolChoiceRelaxLogged = true;
+				this.log("request.tool_choice_relaxed", {
+					variant: variant.id,
+					requested: relaxedFrom,
+					sent: sentToolChoice,
+					hint: "DeepSeek's thinking mode rejects a forced tool_choice, so Required tool mode runs as auto on thinking variants and the model may answer without calling a tool; logged once per session",
+				});
+			}
+
 			const messageChars = this.countMessageChars(messages);
 			const toolChars = this.countToolChars(sentTools);
 			// Per-request char count lives in a LOCAL — if it were on the
@@ -1306,7 +1330,7 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 				maxOutputTokens: model.maxOutputTokens,
 				modelOptions: options.modelOptions as Record<string, unknown> | undefined,
 				tools: sentTools,
-				tool_choice: toolConfig.tool_choice,
+				tool_choice: sentToolChoice,
 			});
 			// Serialize once: reused for the size guard and the fetch body.
 			// DeepSeek caps the request body at 48 MiB, and base64 image
