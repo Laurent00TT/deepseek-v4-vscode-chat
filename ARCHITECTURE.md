@@ -411,7 +411,10 @@ Invariants, in decreasing order of importance:
 - Token budgeting: images bill at up to **1024 tokens each**
   (`IMAGE_TOKENS_PER_IMAGE`; 384 on the retired Vision preview); counted
   into the pre-flight overflow check, the context-usage estimate, and
-  `provideTokenCount`, and subtracted before the chars/token EMA
+  `provideTokenCount` — only for images that will be sent (supported MIME,
+  image-capable variant; `provideTokenCount` resolves the model the host
+  passes, and an id it can't resolve keeps the conservative count) — and
+  subtracted before the chars/token EMA
   calibration (images add prompt tokens without adding chars, which would
   otherwise drag the ratio). The real cost is resolution-based, so an image
   smaller than ~1300×1300 pixels costs less than the ceiling and that
@@ -423,7 +426,8 @@ Invariants, in decreasing order of importance:
   checked once before fetch and an actionable error ("attach fewer/smaller
   images") replaces the opaque server 4xx. A single inline image is capped
   at **32 MiB** (`MAX_IMAGE_BYTES`, raw bytes): the largest user-turn
-  attachment is checked before the body is built, same treatment.
+  attachment in a supported format is checked before the body is built,
+  same treatment (an unsupported one is dropped, so it is never size-checked).
 
 #### V4.1 Flash (verified against the official docs, 2026-10-10)
 

@@ -20,7 +20,13 @@ import {
 	ToolCallAssembler,
 	type CompletedToolCall,
 } from "./sse";
-import { IMAGE_TOKENS_PER_IMAGE, MAX_IMAGE_BYTES, MAX_REQUEST_BODY_BYTES, contentText } from "./image_content";
+import {
+	IMAGE_TOKENS_PER_IMAGE,
+	MAX_IMAGE_BYTES,
+	MAX_REQUEST_BODY_BYTES,
+	contentText,
+	isSupportedImageMime,
+} from "./image_content";
 import { buildRequestBody, coerceReasoningEffort } from "./request_body";
 import { MODEL_VARIANTS, findVariant } from "./model_catalog";
 import { BASE_URL, BALANCE_URL, fetchWithRetry, formatApiError, type BalanceInfo } from "./api_client";
@@ -904,9 +910,11 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	/**
 	 * Image attachments across USER turns — the only place the wire
 	 * conversion emits image blocks: how many, and the largest one's byte
-	 * size. Uses the same structural detection as convertMessages (mimeType
-	 * `image/*` + Uint8Array data) so the figures cover exactly the parts
-	 * that will be sent. Char-based estimation doesn't work for images, so
+	 * size. Uses the same detection as convertMessages (mimeType `image/*` +
+	 * Uint8Array data) plus buildUserContent's MIME gate, so the figures
+	 * cover exactly the parts that will be sent — an unsupported image is
+	 * dropped, so it must not trip the size check or the token budget
+	 * either. Char-based estimation doesn't work for images, so
 	 * they are budgeted separately at the fixed IMAGE_TOKENS_PER_IMAGE
 	 * ceiling; the largest-byte figure feeds the per-image transport
 	 * pre-check (MAX_IMAGE_BYTES).
@@ -920,7 +928,12 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 			}
 			for (const part of m.content) {
 				const obj = part as { mimeType?: unknown; data?: unknown };
-				if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("image/") && obj.data instanceof Uint8Array) {
+				if (
+					typeof obj.mimeType === "string" &&
+					obj.mimeType.startsWith("image/") &&
+					obj.data instanceof Uint8Array &&
+					isSupportedImageMime(obj.mimeType)
+				) {
 					count++;
 					maxBytes = Math.max(maxBytes, obj.data.byteLength);
 				}
@@ -1500,24 +1513,34 @@ export class DeepSeekV4ChatModelProvider implements LanguageModelChatProvider {
 	 * @returns A promise that resolves to the number of tokens
 	 */
 	async provideTokenCount(
-		_model: LanguageModelChatInformation,
+		model: LanguageModelChatInformation,
 		text: string | LanguageModelChatMessage,
 		_token: CancellationToken
 	): Promise<number> {
 		if (typeof text === "string") {
 			return this.estimateText(text);
 		}
+		// Images only cost tokens where they are sent: the image-capable
+		// variants, and only in a format DeepSeek accepts — everywhere else
+		// convertMessages drops them. An id we can't resolve keeps the
+		// conservative count.
+		const variant = findVariant(model?.id);
+		const imagesSent = variant ? variant.vision === true : true;
 		let total = 0;
 		for (const part of text.content) {
 			if (part instanceof vscode.LanguageModelTextPart) {
 				total += this.estimateText(part.value);
-			} else {
-				// Image attachments bill at up to 1024 tokens each on the
-				// image-capable variants — budget them at the ceiling so the
-				// host's prompt planning never under-counts. Same structural
-				// detection as countImageParts.
+			} else if (imagesSent) {
+				// Budget each image at the 1024-token ceiling so the host's
+				// prompt planning never under-counts. Same detection as
+				// imageStats.
 				const obj = part as { mimeType?: unknown; data?: unknown };
-				if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("image/") && obj.data instanceof Uint8Array) {
+				if (
+					typeof obj.mimeType === "string" &&
+					obj.mimeType.startsWith("image/") &&
+					obj.data instanceof Uint8Array &&
+					isSupportedImageMime(obj.mimeType)
+				) {
 					total += IMAGE_TOKENS_PER_IMAGE;
 				}
 			}

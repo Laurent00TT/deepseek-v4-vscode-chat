@@ -102,6 +102,24 @@ async function main() {
 		checkMatch("toast is actionable", shim.calls.showErrorMessage.at(-1)?.message, /Attach a smaller image, or start a new chat/);
 		provider.dispose();
 	}
+	// --- an oversized image in a format DeepSeek rejects is dropped, not size-checked ---
+	{
+		shim.reset();
+		const { provider } = makeProvider();
+		const big = new Uint8Array(32 * 1024 * 1024 + 1);
+		const { result: t, lines } = await withConsole("warn", () =>
+			runTurn(provider, {
+				model: model("deepseek-v4-flash"),
+				messages: [userImageMsg("look", big, "image/bmp")],
+				chunks: ok({ prompt_tokens: 10, completion_tokens: 1 }),
+			})
+		);
+		check("no per-image size error", t.error, undefined);
+		check("request was sent", typeof t.captured.url, "string");
+		check("image dropped from the wire", JSON.parse(t.captured.body ?? "{}").messages?.at(-1)?.content, "look");
+		checkMatch("drop is logged", lines.join("|"), /unsupported MIME type/);
+		provider.dispose();
+	}
 	// --- 48 MiB body pre-check (three 16 MiB images → ~64 MiB of base64) ---
 	{
 		shim.reset();

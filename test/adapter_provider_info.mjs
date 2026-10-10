@@ -1,6 +1,6 @@
 // Picker entries, token counting, and the secret-change reaction.
 import { check, checkDeep, summary, until } from "./helpers/check.mjs";
-import { vscode, shim, makeProvider, fakeSecrets, cancellation, userText } from "./helpers/fakes.mjs";
+import { vscode, shim, makeProvider, fakeSecrets, cancellation, userText, model } from "./helpers/fakes.mjs";
 
 const IDS = ["deepseek-v4-pro::thinking", "deepseek-v4-pro", "deepseek-v4-flash::thinking", "deepseek-v4-flash"];
 
@@ -37,8 +37,12 @@ async function main() {
 		shim.reset();
 		const { provider } = makeProvider();
 		check("string: ceil(len / 3.0)", await provider.provideTokenCount({}, "abcdefg", cancellation().token), 3);
-		const msg = { role: vscode.LanguageModelChatMessageRole.User, content: [new vscode.LanguageModelTextPart("abcdefghi"), new vscode.LanguageModelDataPart(new Uint8Array(10), "image/png")] };
-		check("message: text estimate + 1024 per image", await provider.provideTokenCount({}, msg, cancellation().token), 3 + 1024);
+		const imageMsg = (mime) => ({ role: vscode.LanguageModelChatMessageRole.User, content: [new vscode.LanguageModelTextPart("abcdefghi"), new vscode.LanguageModelDataPart(new Uint8Array(10), mime)] });
+		const count = (m, msg) => provider.provideTokenCount(m, msg, cancellation().token);
+		check("Flash: text estimate + 1024 per image", await count(model("deepseek-v4-flash"), imageMsg("image/png")), 3 + 1024);
+		check("Pro: the image is dropped on the wire, so not counted", await count(model("deepseek-v4-pro::thinking"), imageMsg("image/png")), 3);
+		check("Flash: an unsupported format is dropped, so not counted", await count(model("deepseek-v4-flash"), imageMsg("image/bmp")), 3);
+		check("unresolvable model id: conservative count", await count({}, imageMsg("image/png")), 3 + 1024);
 		provider.dispose();
 	}
 	// --- secret change → picker refresh + session reset + silent balance refresh ---
